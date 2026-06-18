@@ -463,7 +463,21 @@ def debug_env():
         k for k in os.environ
         if k.startswith(("OPENAI", "ZOHO")) and k not in expected
     )
-    return {"expected": present, "other_openai_zoho_keys": related_keys}
+    # Railway auto-injects these into the running container — non-secret.
+    # They reveal exactly which service + environment serves this domain.
+    railway = {
+        k: os.getenv(k)
+        for k in (
+            "RAILWAY_SERVICE_NAME", "RAILWAY_ENVIRONMENT_NAME",
+            "RAILWAY_PROJECT_NAME", "RAILWAY_PUBLIC_DOMAIN",
+            "RAILWAY_GIT_COMMIT_SHA",
+        )
+    }
+    return {
+        "expected": present,
+        "other_openai_zoho_keys": related_keys,
+        "railway": railway,
+    }
 
 
 @app.post("/process_meeting")
