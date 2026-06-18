@@ -40,13 +40,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger("transcriber")
 
+# SECURITY: httpx logs full request URLs at INFO, which would leak the Zoho
+# token-refresh query string (refresh_token/client_secret) and signed download
+# URLs. Silence it so secrets never reach the logs.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 # ---------------------------------------------------------------------------
 # Config (all via environment variables — see .env.example)
 # ---------------------------------------------------------------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe-diarize")
-# Non-diarize model used if the primary (diarize) transcription fails.
-OPENAI_TRANSCRIBE_FALLBACK_MODEL = os.getenv("OPENAI_TRANSCRIBE_FALLBACK_MODEL", "whisper-1")
+# Ordered fallback chain if the primary (diarize) model rejects the audio.
+OPENAI_TRANSCRIBE_FALLBACK_MODELS = [
+    m.strip() for m in os.getenv(
+        "OPENAI_TRANSCRIBE_FALLBACK_MODELS", "gpt-4o-transcribe,whisper-1"
+    ).split(",") if m.strip()
+]
 OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-5-mini")
 
 ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID", "")
@@ -58,7 +68,7 @@ ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/wor
 # OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.6")
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.7")
 
 # Lightweight in-memory status, keyed by file_id — handy for /status debugging.
 # (Resets on each deploy; not durable, just an aid.)
@@ -99,13 +109,15 @@ class MeetingEvent(BaseModel):
 def get_zoho_access_token() -> str:
     """Exchange the long-lived refresh token for a short-lived access token."""
     url = f"{ZOHO_ACCOUNTS_BASE_URL}/oauth/v2/token"
-    params = {
+    # Send credentials in the POST body (form-encoded), NOT the URL query string,
+    # so they never appear in request-URL logs.
+    form = {
         "refresh_token": ZOHO_REFRESH_TOKEN,
         "client_id": ZOHO_CLIENT_ID,
         "client_secret": ZOHO_CLIENT_SECRET,
         "grant_type": "refresh_token",
     }
-    resp = httpx.post(url, params=params, timeout=30)
+    resp = httpx.post(url, data=form, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     token = data.get("access_token")
@@ -200,12 +212,12 @@ def upload_to_workdrive(file_path: str, filename: str, parent_id: str,
 # Audio / ffmpeg helpers
 # ---------------------------------------------------------------------------
 # Standard, widely-supported encoding for OpenAI: mp3 / libmp3lame, 16 kHz mono.
-_AUDIO_CODEC = ["-c:a", "libmp3lame", "-ar", "16000", "-ac", "1", "-b:a", "64k"]
+_AUDIO_CODEC = ["-ac", "1", "-ar", "16000", "-codec:a", "libmp3lame", "-b:a", "64k"]
 
 
 def extract_audio(video_path: str, audio_path: str) -> None:
-    """Extract a standard mp3 (libmp3lame, 16 kHz, mono) audio track from the
-    video. Drops the video track so even huge MP4s become small audio files."""
+    """Extract a standard mp3 (libmp3lame, 16 kHz, mono, 64k) audio track from
+    the video. Drops the video track so even huge MP4s become small audio."""
     cmd = ["ffmpeg", "-y", "-i", video_path, "-vn", *_AUDIO_CODEC, audio_path]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -214,13 +226,13 @@ def extract_audio(video_path: str, audio_path: str) -> None:
 
 
 def verify_audio(audio_path: str) -> float:
-    """Confirm the extracted file is a valid audio file (has an audio stream and
-    a positive duration) via ffprobe before we send it to OpenAI. Returns the
-    duration in seconds."""
+    """Validate the extracted file with ffprobe before sending to OpenAI, and log
+    codec/sample_rate/channels/duration/bit_rate/size. Returns duration (s)."""
     cmd = [
         "ffprobe", "-v", "error",
         "-select_streams", "a:0",
-        "-show_entries", "stream=codec_name:format=duration",
+        "-show_entries",
+        "stream=codec_name,sample_rate,channels,bit_rate:format=duration,size",
         "-of", "json", audio_path,
     ]
     out = subprocess.run(cmd, capture_output=True, text=True)
@@ -228,12 +240,20 @@ def verify_audio(audio_path: str) -> float:
         raise RuntimeError(f"ffprobe failed: {(out.stderr or '')[-300:]}")
     info = json.loads(out.stdout or "{}")
     streams = info.get("streams") or []
-    duration = float((info.get("format") or {}).get("duration") or 0)
-    if not streams or duration <= 0:
-        raise RuntimeError(
-            f"Extracted audio looks invalid (audio_streams={len(streams)}, "
-            f"duration={duration}s) — cannot transcribe."
-        )
+    fmt = info.get("format") or {}
+    s0 = streams[0] if streams else {}
+    duration = float(fmt.get("duration") or 0)
+    details = {
+        "codec_name": s0.get("codec_name"),
+        "sample_rate": s0.get("sample_rate"),
+        "channels": s0.get("channels"),
+        "duration": duration,
+        "bit_rate": s0.get("bit_rate"),
+        "size_bytes": int(fmt.get("size") or os.path.getsize(audio_path)),
+    }
+    logger.info("Audio probe: %s", details)
+    if not streams or duration <= 0 or s0.get("codec_name") != "mp3":
+        raise RuntimeError(f"Extracted audio looks invalid: {details}")
     return duration
 
 
@@ -294,23 +314,24 @@ def _call_transcription(audio_path: str, model: str):
 
 
 def _transcribe_one(audio_path: str, model: str) -> tuple[str, list, str]:
-    """Transcribe one (size-safe) audio file. Returns (text, segments, model_used).
-    Falls back to the non-diarize model if the primary fails or returns nothing."""
-    try:
-        resp = _call_transcription(audio_path, model)
-        text, segs = _extract_text_segments(resp)
-        if text or segs:
-            return text, segs, model
-        raise RuntimeError("primary transcription returned an empty result")
-    except Exception as exc:
-        fb = OPENAI_TRANSCRIBE_FALLBACK_MODEL
-        if not fb or fb == model:
-            raise
-        logger.warning("Transcription with %s failed (%s); falling back to %s",
-                       model, exc, fb)
-        resp = _call_transcription(audio_path, fb)
-        text, segs = _extract_text_segments(resp)
-        return text, segs, fb
+    """Transcribe one (size-safe) audio file, trying the primary model then each
+    fallback in order. Returns (text, segments, model_used)."""
+    chain = [model] + [m for m in OPENAI_TRANSCRIBE_FALLBACK_MODELS if m != model]
+    last_exc: Exception | None = None
+    for m in chain:
+        try:
+            resp = _call_transcription(audio_path, m)
+            text, segs = _extract_text_segments(resp)
+            if text or segs:
+                if m != model:
+                    logger.info("Transcription succeeded via fallback model %s", m)
+                return text, segs, m
+            last_exc = RuntimeError(f"{m} returned an empty result")
+            logger.warning("Transcription via %s returned empty; trying next", m)
+        except Exception as exc:
+            last_exc = exc
+            logger.warning("Transcription via %s failed (%s); trying next", m, exc)
+    raise RuntimeError(f"All transcription models failed: {last_exc}")
 
 
 def transcribe_audio(audio_path: str, model: str) -> tuple[str, list, str]:
@@ -551,7 +572,7 @@ def process_meeting_job(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.6"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.7"}
 
 
 @app.get("/health")
