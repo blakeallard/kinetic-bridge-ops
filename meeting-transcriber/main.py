@@ -1,19 +1,33 @@
 """
 Bevco Meeting Transcriber — FastAPI service for Zoho WorkDrive.
 
-v1 scope:
-  - Accept a webhook payload from Zoho Flow on POST /process_meeting
-  - Log the payload
-  - Return status "accepted"
+v2 pipeline (POST /process_meeting):
+  1. Receive the Zoho Flow webhook payload.
+  2. Download the MP4 from Zoho WorkDrive (OAuth refresh-token flow).
+  3. Extract a small audio track with ffmpeg (handles huge video files).
+  4. Transcribe with OpenAI (chunked automatically if over the size limit).
+  5. Summarize with OpenAI.
+  6. Build metadata.json matching the prior production shape.
+  7. Upload transcript / summary / metadata back into WorkDrive.
 
-Transcription / summarization / upload are intentionally NOT implemented yet.
-See the TODO blocks in process_meeting() for the planned pipeline.
+Heavy work runs in a FastAPI background task so the webhook returns 200
+immediately and Zoho Flow never times out. Every major step is logged.
 """
 
+import json
 import logging
+import math
+import mimetypes
 import os
+import shutil
+import subprocess
+import tempfile
+from datetime import datetime
+from pathlib import Path
 
-from fastapi import FastAPI
+import httpx
+from fastapi import BackgroundTasks, FastAPI
+from openai import OpenAI
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
@@ -29,15 +43,33 @@ logger = logging.getLogger("transcriber")
 # Config (all via environment variables — see .env.example)
 # ---------------------------------------------------------------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe-diarize")
+OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-5-mini")
+
 ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID", "")
 ZOHO_CLIENT_SECRET = os.getenv("ZOHO_CLIENT_SECRET", "")
 ZOHO_REFRESH_TOKEN = os.getenv("ZOHO_REFRESH_TOKEN", "")
-ZOHO_ACCOUNTS_URL = os.getenv("ZOHO_ACCOUNTS_URL", "https://accounts.zoho.com")
-ZOHO_WORKDRIVE_API = os.getenv("ZOHO_WORKDRIVE_API", "https://www.zohoapis.com/workdrive/api/v1")
-OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "whisper-1")
-OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-4o-mini")
+ZOHO_ACCOUNTS_BASE_URL = os.getenv("ZOHO_ACCOUNTS_BASE_URL", "https://accounts.zoho.com")
+ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/workdrive/api/v1")
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="0.1.0")
+# OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
+MAX_AUDIO_BYTES = 24 * 1024 * 1024
+
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.0.0")
+
+# Lightweight in-memory status, keyed by file_id — handy for /status debugging.
+# (Resets on each deploy; not durable, just an aid.)
+job_status: dict[str, dict] = {}
+
+_openai_client: OpenAI | None = None
+
+
+def openai_client() -> OpenAI:
+    """Lazily create the OpenAI client so import never fails on a missing key."""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    return _openai_client
 
 
 # ---------------------------------------------------------------------------
@@ -51,6 +83,7 @@ class MeetingEvent(BaseModel):
     download_url: str | None = None
     folder_id: str | None = None
     target_folder_id: str | None = None
+    permalink: str | None = None
     event: str | None = None
 
     class Config:
@@ -58,11 +91,348 @@ class MeetingEvent(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Health check — Railway and uptime monitors hit this.
+# Zoho WorkDrive helpers
+# ---------------------------------------------------------------------------
+def get_zoho_access_token() -> str:
+    """Exchange the long-lived refresh token for a short-lived access token."""
+    url = f"{ZOHO_ACCOUNTS_BASE_URL}/oauth/v2/token"
+    params = {
+        "refresh_token": ZOHO_REFRESH_TOKEN,
+        "client_id": ZOHO_CLIENT_ID,
+        "client_secret": ZOHO_CLIENT_SECRET,
+        "grant_type": "refresh_token",
+    }
+    resp = httpx.post(url, params=params, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    token = data.get("access_token")
+    if not token:
+        raise RuntimeError(f"Zoho token refresh returned no access_token: {data}")
+    return token
+
+
+def download_workdrive_file(download_url: str | None, file_id: str | None,
+                            token: str, dest_path: str) -> None:
+    """Stream a WorkDrive file to disk. Tries the provided download_url first,
+    then falls back to the WorkDrive download API by file_id."""
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    candidates = []
+    if download_url:
+        candidates.append(download_url)
+    if file_id:
+        candidates.append(f"{ZOHO_API_BASE_URL}/download/{file_id}")
+
+    last_err: Exception | None = None
+    for url in candidates:
+        try:
+            with httpx.stream("GET", url, headers=headers, timeout=None,
+                              follow_redirects=True) as resp:
+                resp.raise_for_status()
+                with open(dest_path, "wb") as fh:
+                    for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
+                        fh.write(chunk)
+            return
+        except Exception as exc:  # try the next candidate URL
+            last_err = exc
+            logger.warning("Download via %s failed: %s", url, exc)
+    raise RuntimeError(f"All WorkDrive download attempts failed: {last_err}")
+
+
+def upload_to_workdrive(file_path: str, filename: str, parent_id: str,
+                        token: str) -> dict:
+    """Upload a single file into a WorkDrive folder via the upload API."""
+    url = f"{ZOHO_API_BASE_URL}/upload"
+    headers = {"Authorization": f"Zoho-oauthtoken {token}"}
+    mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    with open(file_path, "rb") as fh:
+        files = {"content": (filename, fh, mime)}
+        data = {
+            "parent_id": parent_id,
+            "filename": filename,
+            "override-name-exist": "true",
+        }
+        resp = httpx.post(url, headers=headers, data=data, files=files, timeout=180)
+    resp.raise_for_status()
+    return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Audio / ffmpeg helpers
+# ---------------------------------------------------------------------------
+def extract_audio(video_path: str, audio_path: str) -> None:
+    """Extract a small mono 16 kHz 32 kbps mp3 from the video (drops the video
+    track, which is the bulk of the size). Keeps huge MP4s under the API limit."""
+    cmd = [
+        "ffmpeg", "-y", "-i", video_path,
+        "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k",
+        audio_path,
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+
+def get_audio_duration(audio_path: str) -> float:
+    """Return media duration in seconds via ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        audio_path,
+    ]
+    out = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return float(out.stdout.strip())
+
+
+# ---------------------------------------------------------------------------
+# OpenAI transcription
+# ---------------------------------------------------------------------------
+def _extract_text_segments(resp) -> tuple[str, list]:
+    """Normalize a transcription response (object / dict / plain str) into
+    (text, segments)."""
+    if isinstance(resp, str):
+        return resp, []
+
+    data = None
+    if hasattr(resp, "model_dump"):
+        try:
+            data = resp.model_dump()
+        except Exception:
+            data = None
+    if data is None and isinstance(resp, dict):
+        data = resp
+    if data is None:
+        text = getattr(resp, "text", "") or ""
+        segs = getattr(resp, "segments", None) or []
+        return text, list(segs)
+
+    text = data.get("text") or ""
+    segs = data.get("segments") or []
+    return text, segs
+
+
+def _transcribe_one(audio_path: str, model: str) -> tuple[str, list]:
+    """Transcribe a single (already small enough) audio file."""
+    fmt = "diarized_json" if "diarize" in model.lower() else "json"
+    with open(audio_path, "rb") as fh:
+        try:
+            resp = openai_client().audio.transcriptions.create(
+                model=model, file=fh, response_format=fmt
+            )
+        except Exception as exc:
+            logger.warning("Transcribe format=%s failed (%s); retrying as text", fmt, exc)
+            fh.seek(0)
+            resp = openai_client().audio.transcriptions.create(
+                model=model, file=fh, response_format="text"
+            )
+    return _extract_text_segments(resp)
+
+
+def transcribe_audio(audio_path: str, model: str) -> tuple[str, list]:
+    """Transcribe an audio file, splitting into time-based chunks if it exceeds
+    the OpenAI size limit. Returns (raw_text, segments)."""
+    size = os.path.getsize(audio_path)
+    if size <= MAX_AUDIO_BYTES:
+        return _transcribe_one(audio_path, model)
+
+    duration = get_audio_duration(audio_path)
+    num_chunks = math.ceil(size / MAX_AUDIO_BYTES)
+    chunk_dur = duration / num_chunks
+    logger.info(
+        "Audio is %.1f MB (> %d MB limit); splitting into %d chunks (~%.0fs each)",
+        size / 1e6, MAX_AUDIO_BYTES // (1024 * 1024), num_chunks, chunk_dur,
+    )
+
+    all_text: list[str] = []
+    all_segs: list = []
+    for i in range(num_chunks):
+        start = i * chunk_dur
+        chunk_path = f"{audio_path}.part{i}.mp3"
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(start), "-t", str(chunk_dur),
+            "-i", audio_path, "-ac", "1", "-ar", "16000", "-b:a", "32k",
+            chunk_path,
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        logger.info("Transcribing chunk %d/%d", i + 1, num_chunks)
+        text, segs = _transcribe_one(chunk_path, model)
+        all_text.append(text)
+        all_segs.extend(segs)
+        os.remove(chunk_path)
+
+    return "\n".join(t for t in all_text if t), all_segs
+
+
+def render_transcript(raw_text: str, segments: list) -> str:
+    """Produce a readable transcript. Uses speaker-labeled segments when the
+    diarization model provides them, otherwise the plain text."""
+    if segments:
+        lines = []
+        for seg in segments:
+            if isinstance(seg, dict):
+                speaker = seg.get("speaker")
+                text = seg.get("text")
+            else:
+                speaker = getattr(seg, "speaker", None)
+                text = getattr(seg, "text", None)
+            if not text:
+                continue
+            text = text.strip()
+            lines.append(f"{speaker}: {text}" if speaker else text)
+        if lines:
+            return "\n".join(lines)
+    return raw_text
+
+
+# ---------------------------------------------------------------------------
+# OpenAI summary
+# ---------------------------------------------------------------------------
+def summarize(transcript: str, model: str, meeting_name: str) -> str:
+    """Generate a clean meeting summary from the transcript."""
+    resp = openai_client().chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": "You write clear, concise, well-structured meeting summaries.",
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Meeting: {meeting_name}\n\n"
+                    "Write a clean summary of the meeting below. Include these "
+                    "sections when the content supports them:\n"
+                    "- Overview\n- Key Discussion Points\n- Decisions\n"
+                    "- Action Items (with owners and due dates if mentioned)\n\n"
+                    f"Transcript:\n{transcript}"
+                ),
+            },
+        ],
+    )
+    return resp.choices[0].message.content or ""
+
+
+# ---------------------------------------------------------------------------
+# Background pipeline
+# ---------------------------------------------------------------------------
+def process_meeting_job(payload: dict) -> None:
+    file_id = payload.get("file_id") or "unknown"
+    file_name = payload.get("file_name") or "meeting.mp4"
+    download_url = payload.get("download_url")
+    target_folder_id = payload.get("target_folder_id") or payload.get("folder_id")
+    meeting_name = Path(file_name).stem
+
+    job_status[file_id] = {"state": "processing", "step": "start", "file_name": file_name}
+
+    missing = [
+        name for name, val in {
+            "OPENAI_API_KEY": OPENAI_API_KEY,
+            "ZOHO_CLIENT_ID": ZOHO_CLIENT_ID,
+            "ZOHO_CLIENT_SECRET": ZOHO_CLIENT_SECRET,
+            "ZOHO_REFRESH_TOKEN": ZOHO_REFRESH_TOKEN,
+        }.items() if not val
+    ]
+    if missing:
+        msg = f"Missing required env vars: {', '.join(missing)}"
+        logger.error(msg)
+        job_status[file_id] = {"state": "error", "error": msg}
+        return
+    if not target_folder_id:
+        msg = "No target_folder_id (or folder_id) in payload — nowhere to upload results."
+        logger.error(msg)
+        job_status[file_id] = {"state": "error", "error": msg}
+        return
+
+    workdir = tempfile.mkdtemp(prefix="meeting_")
+    try:
+        token = get_zoho_access_token()
+
+        # 1. Download -----------------------------------------------------
+        video_path = os.path.join(workdir, file_name)
+        logger.info("Download started: %s", file_name)
+        job_status[file_id]["step"] = "download"
+        download_workdrive_file(download_url, file_id, token, video_path)
+        input_size_mb = round(os.path.getsize(video_path) / 1024 / 1024, 2)
+        logger.info("Download complete: %s (%.2f MB)", file_name, input_size_mb)
+
+        # 2. Extract audio ------------------------------------------------
+        audio_path = os.path.join(workdir, f"{meeting_name}.mp3")
+        logger.info("Extracting audio with ffmpeg...")
+        job_status[file_id]["step"] = "extract_audio"
+        extract_audio(video_path, audio_path)
+        logger.info("Audio extracted: %.2f MB", os.path.getsize(audio_path) / 1024 / 1024)
+
+        # 3. Transcribe ---------------------------------------------------
+        logger.info("Transcription started (model=%s)", OPENAI_TRANSCRIBE_MODEL)
+        job_status[file_id]["step"] = "transcribe"
+        raw_text, segments = transcribe_audio(audio_path, OPENAI_TRANSCRIBE_MODEL)
+        transcript_text = render_transcript(raw_text, segments)
+        segment_count = len(segments)
+        logger.info(
+            "Transcription complete: %d segments, %d chars",
+            segment_count, len(transcript_text),
+        )
+
+        # 4. Summarize ----------------------------------------------------
+        logger.info("Summary started (model=%s)", OPENAI_SUMMARY_MODEL)
+        job_status[file_id]["step"] = "summarize"
+        summary_text = summarize(transcript_text, OPENAI_SUMMARY_MODEL, meeting_name)
+        logger.info("Summary complete: %d chars", len(summary_text))
+
+        # 5. Metadata + write files --------------------------------------
+        out_names = {
+            "transcript": f"{meeting_name}_transcript.txt",
+            "summary": f"{meeting_name}_summary.txt",
+            "metadata": f"{meeting_name}_metadata.json",
+        }
+        metadata = {
+            "meeting_name": meeting_name,
+            "source_file_id": file_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "input_file_name": file_name,
+            "input_size_mb": input_size_mb,
+            "transcribe_model": OPENAI_TRANSCRIBE_MODEL,
+            "summary_model": OPENAI_SUMMARY_MODEL,
+            "segment_count": segment_count,
+            "output_files": out_names,
+        }
+
+        transcript_path = os.path.join(workdir, out_names["transcript"])
+        summary_path = os.path.join(workdir, out_names["summary"])
+        metadata_path = os.path.join(workdir, out_names["metadata"])
+        Path(transcript_path).write_text(transcript_text, encoding="utf-8")
+        Path(summary_path).write_text(summary_text, encoding="utf-8")
+        Path(metadata_path).write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+        # 6. Upload -------------------------------------------------------
+        # Refresh the token — transcription of a long meeting can outlast the
+        # ~1 hour access-token lifetime.
+        token = get_zoho_access_token()
+        logger.info("Upload started -> folder %s", target_folder_id)
+        job_status[file_id]["step"] = "upload"
+        for path in (transcript_path, summary_path, metadata_path):
+            name = os.path.basename(path)
+            upload_to_workdrive(path, name, target_folder_id, token)
+            logger.info("Uploaded %s", name)
+        logger.info("Upload complete for meeting '%s'", meeting_name)
+
+        job_status[file_id] = {
+            "state": "done",
+            "meeting_name": meeting_name,
+            "segment_count": segment_count,
+            "output_files": out_names,
+        }
+    except Exception as exc:
+        logger.exception("Processing failed for '%s': %s", file_name, exc)
+        job_status[file_id] = {"state": "error", "error": str(exc)}
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Routes
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.0.0"}
 
 
 @app.get("/health")
@@ -70,60 +440,22 @@ def health():
     return {"status": "healthy"}
 
 
-# ---------------------------------------------------------------------------
-# Main webhook endpoint
-# ---------------------------------------------------------------------------
+@app.get("/status/{file_id}")
+def status(file_id: str):
+    return job_status.get(file_id, {"state": "unknown"})
+
+
 @app.post("/process_meeting")
-def process_meeting(payload: MeetingEvent):
-    logger.info("Received meeting event: %s", payload.model_dump())
-
-    # =====================================================================
-    # TODO 1: Download the MP4 from Zoho WorkDrive
-    # ---------------------------------------------------------------------
-    # - Get a fresh Zoho access token from the refresh token
-    #   (POST {ZOHO_ACCOUNTS_URL}/oauth/v2/token with grant_type=refresh_token).
-    # - Use payload.download_url (or the WorkDrive download endpoint with
-    #   payload.file_id) to stream the file to a temp path under /tmp.
-    # - Verify the file is a video before continuing.
-    # =====================================================================
-
-    # =====================================================================
-    # TODO 2: Send the audio to OpenAI for transcription
-    # ---------------------------------------------------------------------
-    # - Use OPENAI_API_KEY + OPENAI_TRANSCRIBE_MODEL (default whisper-1).
-    # - WorkDrive recordings may exceed the API size limit (~25 MB) — plan to
-    #   extract/compress the audio track or chunk long meetings.
-    # - Collect the full transcript text (+ optional timestamps).
-    # =====================================================================
-
-    # =====================================================================
-    # TODO 3: Generate a summary
-    # ---------------------------------------------------------------------
-    # - Call a chat model (OPENAI_SUMMARY_MODEL) with the transcript.
-    # - Produce: overview, key decisions, action items, attendees if inferable.
-    # =====================================================================
-
-    # =====================================================================
-    # TODO 4: Build metadata.json
-    # ---------------------------------------------------------------------
-    # - Capture: original file_name, file_id, processed_at timestamp,
-    #   model versions used, duration, transcript word count, summary.
-    # =====================================================================
-
-    # =====================================================================
-    # TODO 5: Upload results back to WorkDrive
-    # ---------------------------------------------------------------------
-    # - Upload transcript.txt, summary.md, metadata.json into
-    #   payload.target_folder_id via the WorkDrive upload API.
-    # - Consider a subfolder named after the meeting for tidy organization.
-    # =====================================================================
-
+def process_meeting(payload: MeetingEvent, background_tasks: BackgroundTasks):
+    data = payload.model_dump()
+    logger.info("Received meeting event: %s", data)
+    background_tasks.add_task(process_meeting_job, data)
     return {
         "status": "accepted",
         "file_name": payload.file_name,
         "file_id": payload.file_id,
         "event": payload.event,
-        "message": "Payload received and logged. Transcription not yet implemented.",
+        "message": "Payload received. Processing started in the background.",
     }
 
 
