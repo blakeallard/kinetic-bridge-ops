@@ -56,7 +56,7 @@ ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/wor
 # OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.2")
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.3")
 
 # Lightweight in-memory status, keyed by file_id — handy for /status debugging.
 # (Resets on each deploy; not durable, just an aid.)
@@ -205,7 +205,12 @@ def extract_audio(video_path: str, audio_path: str) -> None:
         "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k",
         audio_path,
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()[-6:]
+        raise RuntimeError(
+            f"ffmpeg exit {proc.returncode}: " + " | ".join(tail)
+        )
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -388,8 +393,23 @@ def process_meeting_job(payload: dict) -> None:
         logger.info("Download started: %s", file_name)
         job_status[file_id]["step"] = "download"
         download_workdrive_file(download_url, file_id, token, video_path)
-        input_size_mb = round(os.path.getsize(video_path) / 1024 / 1024, 2)
-        logger.info("Download complete: %s (%.2f MB)", file_name, input_size_mb)
+        downloaded_bytes = os.path.getsize(video_path)
+        input_size_mb = round(downloaded_bytes / 1024 / 1024, 2)
+        # Sniff the first bytes — if Zoho returned an HTML/JSON error page with a
+        # 200, ffmpeg would choke; surface that clearly instead.
+        with open(video_path, "rb") as _fh:
+            head = _fh.read(16)
+        looks_like_text = head[:1] in (b"<", b"{") or head[:5] == b"<!DOC"
+        job_status[file_id]["downloaded_mb"] = input_size_mb
+        job_status[file_id]["head_hex"] = head.hex()
+        logger.info("Download complete: %s (%.2f MB, head=%s)",
+                    file_name, input_size_mb, head.hex())
+        if downloaded_bytes < 1024 or looks_like_text:
+            snippet = head.decode("utf-8", "replace")
+            raise RuntimeError(
+                f"Downloaded file looks invalid ({downloaded_bytes} bytes, "
+                f"starts with {snippet!r}) — likely an error page, not the MP4."
+            )
 
         # 2. Extract audio ------------------------------------------------
         audio_path = os.path.join(workdir, f"{meeting_name}.mp3")
@@ -470,7 +490,7 @@ def process_meeting_job(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.2"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.3"}
 
 
 @app.get("/health")
