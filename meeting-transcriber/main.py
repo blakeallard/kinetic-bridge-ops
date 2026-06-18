@@ -56,7 +56,7 @@ ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/wor
 # OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.4")
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.5")
 
 # Lightweight in-memory status, keyed by file_id — handy for /status debugging.
 # (Resets on each deploy; not durable, just an aid.)
@@ -254,17 +254,20 @@ def _extract_text_segments(resp) -> tuple[str, list]:
 
 def _transcribe_one(audio_path: str, model: str) -> tuple[str, list]:
     """Transcribe a single (already small enough) audio file."""
-    fmt = "diarized_json" if "diarize" in model.lower() else "json"
+    is_diarize = "diarize" in model.lower()
+    fmt = "diarized_json" if is_diarize else "json"
+    # Diarization models require an explicit chunking_strategy.
+    extra = {"chunking_strategy": "auto"} if is_diarize else {}
     with open(audio_path, "rb") as fh:
         try:
             resp = openai_client().audio.transcriptions.create(
-                model=model, file=fh, response_format=fmt
+                model=model, file=fh, response_format=fmt, **extra
             )
         except Exception as exc:
             logger.warning("Transcribe format=%s failed (%s); retrying as text", fmt, exc)
             fh.seek(0)
             resp = openai_client().audio.transcriptions.create(
-                model=model, file=fh, response_format="text"
+                model=model, file=fh, response_format="text", **extra
             )
     return _extract_text_segments(resp)
 
@@ -363,7 +366,20 @@ def process_meeting_job(payload: dict) -> None:
     target_folder_id = payload.get("target_folder_id") or payload.get("folder_id")
     meeting_name = Path(file_name).stem
 
-    job_status[file_id] = {"state": "processing", "step": "start", "file_name": file_name}
+    # Capture what Zoho actually sent (sensitive values redacted to length) so
+    # payload-shape problems are visible in /jobs.
+    recv = {
+        "payload_keys": sorted(payload.keys()),
+        "payload_preview": {
+            k: (None if v is None
+                else f"<{len(str(v))} chars>"
+                if any(s in k.lower() for s in ("url", "permalink", "token", "secret"))
+                else str(v)[:80])
+            for k, v in payload.items()
+        },
+    }
+    job_status[file_id] = {"state": "processing", "step": "start",
+                           "file_name": file_name, **recv}
 
     missing = [
         name for name, val in {
@@ -376,12 +392,12 @@ def process_meeting_job(payload: dict) -> None:
     if missing:
         msg = f"Missing required env vars: {', '.join(missing)}"
         logger.error(msg)
-        job_status[file_id] = {"state": "error", "error": msg}
+        job_status[file_id] = {"state": "error", "error": msg, **recv}
         return
     if not target_folder_id:
         msg = "No target_folder_id (or folder_id) in payload — nowhere to upload results."
         logger.error(msg)
-        job_status[file_id] = {"state": "error", "error": msg}
+        job_status[file_id] = {"state": "error", "error": msg, **recv}
         return
 
     workdir = tempfile.mkdtemp(prefix="meeting_")
@@ -490,7 +506,7 @@ def process_meeting_job(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.4"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.5"}
 
 
 @app.get("/health")
