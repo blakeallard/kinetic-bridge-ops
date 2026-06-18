@@ -111,31 +111,68 @@ def get_zoho_access_token() -> str:
     return token
 
 
+def _zoho_download_host() -> str:
+    """Derive the WorkDrive download host for the configured data center.
+    e.g. https://www.zohoapis.com/... -> https://download.zoho.com"""
+    suffix = ".com"
+    host = ZOHO_API_BASE_URL.split("//", 1)[-1].split("/", 1)[0]  # www.zohoapis.com
+    if "zohoapis" in host:
+        suffix = host.split("zohoapis", 1)[-1] or ".com"  # ".com", ".eu", ".in", ...
+    return f"https://download.zoho{suffix}"
+
+
+def _metadata_download_url(file_id: str, token: str) -> str | None:
+    """Fetch file metadata and return the download URL Zoho reports for it."""
+    url = f"{ZOHO_API_BASE_URL}/files/{file_id}"
+    headers = {
+        "Authorization": f"Zoho-oauthtoken {token}",
+        "Accept": "application/vnd.api+json",
+    }
+    resp = httpx.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    attrs = (resp.json().get("data") or {}).get("attributes") or {}
+    return attrs.get("download_url") or attrs.get("Download") or None
+
+
 def download_workdrive_file(download_url: str | None, file_id: str | None,
                             token: str, dest_path: str) -> None:
-    """Stream a WorkDrive file to disk. Tries the provided download_url first,
-    then falls back to the WorkDrive download API by file_id."""
+    """Stream a WorkDrive file to disk, trying several strategies and recording
+    the full error (status + Zoho response body) from each so failures are
+    diagnosable."""
     headers = {"Authorization": f"Zoho-oauthtoken {token}"}
-    candidates = []
-    if download_url:
-        candidates.append(download_url)
-    if file_id:
-        candidates.append(f"{ZOHO_API_BASE_URL}/download/{file_id}")
 
-    last_err: Exception | None = None
-    for url in candidates:
+    # Build the ordered list of (label, url) strategies.
+    candidates: list[tuple[str, str]] = []
+    if download_url:
+        candidates.append(("payload_download_url", download_url))
+    if file_id:
+        try:
+            meta_url = _metadata_download_url(file_id, token)
+            if meta_url:
+                candidates.append(("metadata_download_url", meta_url))
+        except Exception as exc:
+            logger.warning("Metadata lookup for %s failed: %s", file_id, exc)
+        candidates.append(
+            ("download_host", f"{_zoho_download_host()}/v1/workdrive/download/{file_id}")
+        )
+
+    errors: list[str] = []
+    for label, url in candidates:
         try:
             with httpx.stream("GET", url, headers=headers, timeout=None,
                               follow_redirects=True) as resp:
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    body = resp.read().decode("utf-8", "replace")[:300]
+                    raise RuntimeError(f"HTTP {resp.status_code}: {body}")
                 with open(dest_path, "wb") as fh:
                     for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
                         fh.write(chunk)
+            logger.info("Download succeeded via [%s]", label)
             return
-        except Exception as exc:  # try the next candidate URL
-            last_err = exc
-            logger.warning("Download via %s failed: %s", url, exc)
-    raise RuntimeError(f"All WorkDrive download attempts failed: {last_err}")
+        except Exception as exc:
+            logger.warning("Download attempt [%s] %s failed: %s", label, url, exc)
+            errors.append(f"[{label}] {exc}")
+    raise RuntimeError("All WorkDrive download attempts failed -> " + " || ".join(errors))
 
 
 def upload_to_workdrive(file_path: str, filename: str, parent_id: str,
