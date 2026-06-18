@@ -14,6 +14,7 @@ Heavy work runs in a FastAPI background task so the webhook returns 200
 immediately and Zoho Flow never times out. Every major step is logged.
 """
 
+import hashlib
 import json
 import logging
 import math
@@ -55,7 +56,7 @@ ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/wor
 # OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.1")
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.2")
 
 # Lightweight in-memory status, keyed by file_id — handy for /status debugging.
 # (Resets on each deploy; not durable, just an aid.)
@@ -469,12 +470,41 @@ def process_meeting_job(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.1"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.2"}
 
 
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+@app.get("/removed-endpoint")
+def debug_zoho():
+    """Diagnostic: fingerprints the loaded refresh token (no secret exposed) and
+    performs a live token refresh + a basic WorkDrive call so we can see exactly
+    whether the token has WorkDrive scope. Remove once auth is confirmed."""
+    rt = os.getenv("ZOHO_REFRESH_TOKEN", "")
+    out: dict = {
+        "refresh_token_len": len(rt),
+        "refresh_token_sha8": hashlib.sha256(rt.encode()).hexdigest()[:8] if rt else None,
+        "api_base": ZOHO_API_BASE_URL,
+        "accounts_base": ZOHO_ACCOUNTS_BASE_URL,
+    }
+    try:
+        token = get_zoho_access_token()
+        out["token_refresh"] = "ok"
+        out["access_token_len"] = len(token)
+        r = httpx.get(
+            f"{ZOHO_API_BASE_URL}/users/me",
+            headers={"Authorization": f"Zoho-oauthtoken {token}",
+                     "Accept": "application/vnd.api+json"},
+            timeout=30,
+        )
+        out["workdrive_users_me_status"] = r.status_code
+        out["workdrive_users_me_body"] = r.text[:300]
+    except Exception as exc:
+        out["error"] = str(exc)
+    return out
 
 
 @app.get("/jobs")
