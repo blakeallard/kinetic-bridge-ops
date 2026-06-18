@@ -55,7 +55,7 @@ ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/wor
 # OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="2.0.0")
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.0")
 
 # Lightweight in-memory status, keyed by file_id — handy for /status debugging.
 # (Resets on each deploy; not durable, just an aid.)
@@ -469,7 +469,7 @@ def process_meeting_job(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.0.0"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.0"}
 
 
 @app.get("/health")
