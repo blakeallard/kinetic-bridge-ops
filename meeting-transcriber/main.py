@@ -56,7 +56,7 @@ ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/wor
 # OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.3")
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.4")
 
 # Lightweight in-memory status, keyed by file_id — handy for /status debugging.
 # (Resets on each deploy; not durable, just an aid.)
@@ -490,7 +490,7 @@ def process_meeting_job(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.3"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.4"}
 
 
 @app.get("/health")
@@ -499,29 +499,47 @@ def health():
 
 
 @app.get("/removed-endpoint")
-def debug_zoho():
-    """Diagnostic: fingerprints the loaded refresh token (no secret exposed) and
-    performs a live token refresh + a basic WorkDrive call so we can see exactly
-    whether the token has WorkDrive scope. Remove once auth is confirmed."""
+def debug_zoho(file_id: str | None = None):
+    """Diagnostic: token scope check, plus (if file_id given) the raw /files/{id}
+    metadata and a detailed probe of the download host so we can see the correct
+    download mechanism. Remove once download is confirmed."""
     rt = os.getenv("ZOHO_REFRESH_TOKEN", "")
     out: dict = {
-        "refresh_token_len": len(rt),
         "refresh_token_sha8": hashlib.sha256(rt.encode()).hexdigest()[:8] if rt else None,
         "api_base": ZOHO_API_BASE_URL,
-        "accounts_base": ZOHO_ACCOUNTS_BASE_URL,
     }
     try:
         token = get_zoho_access_token()
         out["token_refresh"] = "ok"
-        out["access_token_len"] = len(token)
-        r = httpx.get(
-            f"{ZOHO_API_BASE_URL}/users/me",
-            headers={"Authorization": f"Zoho-oauthtoken {token}",
-                     "Accept": "application/vnd.api+json"},
-            timeout=30,
-        )
-        out["workdrive_users_me_status"] = r.status_code
-        out["workdrive_users_me_body"] = r.text[:300]
+        hdr = {"Authorization": f"Zoho-oauthtoken {token}"}
+        api_hdr = {**hdr, "Accept": "application/vnd.api+json"}
+
+        r = httpx.get(f"{ZOHO_API_BASE_URL}/users/me", headers=api_hdr, timeout=30)
+        out["users_me_status"] = r.status_code
+
+        if file_id:
+            # Raw file metadata — reveals the correct download attribute/link.
+            try:
+                m = httpx.get(f"{ZOHO_API_BASE_URL}/files/{file_id}",
+                              headers=api_hdr, timeout=30)
+                out["files_status"] = m.status_code
+                out["files_body"] = m.text[:1200]
+            except Exception as exc:
+                out["files_error"] = str(exc)
+
+            # Probe the download host with full detail (status, ctype, head bytes).
+            dh = f"{_zoho_download_host()}/v1/workdrive/download/{file_id}"
+            out["download_host_url"] = dh
+            try:
+                d = httpx.get(dh, headers=hdr, timeout=60, follow_redirects=True)
+                out["download_host_status"] = d.status_code
+                out["download_host_ctype"] = d.headers.get("content-type")
+                out["download_host_len"] = len(d.content)
+                out["download_host_head_hex"] = d.content[:24].hex()
+                if d.status_code >= 400:
+                    out["download_host_body"] = d.text[:300]
+            except Exception as exc:
+                out["download_host_error"] = str(exc)
     except Exception as exc:
         out["error"] = str(exc)
     return out
