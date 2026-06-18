@@ -67,8 +67,10 @@ ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/wor
 
 # OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
+# Hard cap on chunk length (seconds). Drives chunking by duration, not file size.
+MAX_CHUNK_SECONDS = 1200
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.7")
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.8")
 
 # Lightweight in-memory status, keyed by file_id — handy for /status debugging.
 # (Resets on each deploy; not durable, just an aid.)
@@ -335,18 +337,18 @@ def _transcribe_one(audio_path: str, model: str) -> tuple[str, list, str]:
 
 
 def transcribe_audio(audio_path: str, model: str) -> tuple[str, list, str]:
-    """Transcribe an audio file, splitting into time-based chunks if it exceeds
-    the OpenAI size limit. Returns (raw_text, segments, model_used)."""
-    size = os.path.getsize(audio_path)
-    if size <= MAX_AUDIO_BYTES:
+    """Transcribe an audio file, splitting into chunks no longer than
+    MAX_CHUNK_SECONDS (duration-based, not size-based). At 64 kbps a 1200 s chunk
+    is ~9.6 MB, well under the OpenAI limit. Returns (raw_text, segments, model)."""
+    duration = get_audio_duration(audio_path)
+    if duration <= MAX_CHUNK_SECONDS:
         return _transcribe_one(audio_path, model)
 
-    duration = get_audio_duration(audio_path)
-    num_chunks = math.ceil(size / MAX_AUDIO_BYTES)
-    chunk_dur = duration / num_chunks
+    num_chunks = math.ceil(duration / MAX_CHUNK_SECONDS)
+    chunk_dur = duration / num_chunks  # even split; each <= MAX_CHUNK_SECONDS
     logger.info(
-        "Audio is %.1f MB (> %d MB limit); splitting into %d chunks (~%.0fs each)",
-        size / 1e6, MAX_AUDIO_BYTES // (1024 * 1024), num_chunks, chunk_dur,
+        "Audio is %.0fs (> %ds/chunk); splitting into %d chunks (~%.0fs each)",
+        duration, MAX_CHUNK_SECONDS, num_chunks, chunk_dur,
     )
 
     all_text: list[str] = []
@@ -572,7 +574,7 @@ def process_meeting_job(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.7"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.8"}
 
 
 @app.get("/health")
