@@ -45,6 +45,8 @@ logger = logging.getLogger("transcriber")
 # ---------------------------------------------------------------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-transcribe-diarize")
+# Non-diarize model used if the primary (diarize) transcription fails.
+OPENAI_TRANSCRIBE_FALLBACK_MODEL = os.getenv("OPENAI_TRANSCRIBE_FALLBACK_MODEL", "whisper-1")
 OPENAI_SUMMARY_MODEL = os.getenv("OPENAI_SUMMARY_MODEL", "gpt-5-mini")
 
 ZOHO_CLIENT_ID = os.getenv("ZOHO_CLIENT_ID", "")
@@ -56,7 +58,7 @@ ZOHO_API_BASE_URL = os.getenv("ZOHO_API_BASE_URL", "https://www.zohoapis.com/wor
 # OpenAI transcription endpoint rejects files larger than 25 MB. Stay under it.
 MAX_AUDIO_BYTES = 24 * 1024 * 1024
 
-app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.5")
+app = FastAPI(title="Bevco Meeting Transcriber", version="2.1.6")
 
 # Lightweight in-memory status, keyed by file_id — handy for /status debugging.
 # (Resets on each deploy; not durable, just an aid.)
@@ -197,20 +199,42 @@ def upload_to_workdrive(file_path: str, filename: str, parent_id: str,
 # ---------------------------------------------------------------------------
 # Audio / ffmpeg helpers
 # ---------------------------------------------------------------------------
+# Standard, widely-supported encoding for OpenAI: mp3 / libmp3lame, 16 kHz mono.
+_AUDIO_CODEC = ["-c:a", "libmp3lame", "-ar", "16000", "-ac", "1", "-b:a", "64k"]
+
+
 def extract_audio(video_path: str, audio_path: str) -> None:
-    """Extract a small mono 16 kHz 32 kbps mp3 from the video (drops the video
-    track, which is the bulk of the size). Keeps huge MP4s under the API limit."""
-    cmd = [
-        "ffmpeg", "-y", "-i", video_path,
-        "-vn", "-ac", "1", "-ar", "16000", "-b:a", "32k",
-        audio_path,
-    ]
+    """Extract a standard mp3 (libmp3lame, 16 kHz, mono) audio track from the
+    video. Drops the video track so even huge MP4s become small audio files."""
+    cmd = ["ffmpeg", "-y", "-i", video_path, "-vn", *_AUDIO_CODEC, audio_path]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         tail = (proc.stderr or "").strip().splitlines()[-6:]
+        raise RuntimeError(f"ffmpeg exit {proc.returncode}: " + " | ".join(tail))
+
+
+def verify_audio(audio_path: str) -> float:
+    """Confirm the extracted file is a valid audio file (has an audio stream and
+    a positive duration) via ffprobe before we send it to OpenAI. Returns the
+    duration in seconds."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a:0",
+        "-show_entries", "stream=codec_name:format=duration",
+        "-of", "json", audio_path,
+    ]
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    if out.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {(out.stderr or '')[-300:]}")
+    info = json.loads(out.stdout or "{}")
+    streams = info.get("streams") or []
+    duration = float((info.get("format") or {}).get("duration") or 0)
+    if not streams or duration <= 0:
         raise RuntimeError(
-            f"ffmpeg exit {proc.returncode}: " + " | ".join(tail)
+            f"Extracted audio looks invalid (audio_streams={len(streams)}, "
+            f"duration={duration}s) — cannot transcribe."
         )
+    return duration
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -252,29 +276,46 @@ def _extract_text_segments(resp) -> tuple[str, list]:
     return text, segs
 
 
-def _transcribe_one(audio_path: str, model: str) -> tuple[str, list]:
-    """Transcribe a single (already small enough) audio file."""
+def _call_transcription(audio_path: str, model: str):
+    """Single OpenAI transcription call with the right params for the model
+    family. Diarize models need response_format=diarized_json + chunking_strategy;
+    whisper-1 uses verbose_json (which returns segments); others use json."""
     is_diarize = "diarize" in model.lower()
-    fmt = "diarized_json" if is_diarize else "json"
-    # Diarization models require an explicit chunking_strategy.
-    extra = {"chunking_strategy": "auto"} if is_diarize else {}
     with open(audio_path, "rb") as fh:
-        try:
-            resp = openai_client().audio.transcriptions.create(
-                model=model, file=fh, response_format=fmt, **extra
+        if is_diarize:
+            return openai_client().audio.transcriptions.create(
+                model=model, file=fh, response_format="diarized_json",
+                chunking_strategy="auto",
             )
-        except Exception as exc:
-            logger.warning("Transcribe format=%s failed (%s); retrying as text", fmt, exc)
-            fh.seek(0)
-            resp = openai_client().audio.transcriptions.create(
-                model=model, file=fh, response_format="text", **extra
-            )
-    return _extract_text_segments(resp)
+        fmt = "verbose_json" if "whisper" in model.lower() else "json"
+        return openai_client().audio.transcriptions.create(
+            model=model, file=fh, response_format=fmt,
+        )
 
 
-def transcribe_audio(audio_path: str, model: str) -> tuple[str, list]:
+def _transcribe_one(audio_path: str, model: str) -> tuple[str, list, str]:
+    """Transcribe one (size-safe) audio file. Returns (text, segments, model_used).
+    Falls back to the non-diarize model if the primary fails or returns nothing."""
+    try:
+        resp = _call_transcription(audio_path, model)
+        text, segs = _extract_text_segments(resp)
+        if text or segs:
+            return text, segs, model
+        raise RuntimeError("primary transcription returned an empty result")
+    except Exception as exc:
+        fb = OPENAI_TRANSCRIBE_FALLBACK_MODEL
+        if not fb or fb == model:
+            raise
+        logger.warning("Transcription with %s failed (%s); falling back to %s",
+                       model, exc, fb)
+        resp = _call_transcription(audio_path, fb)
+        text, segs = _extract_text_segments(resp)
+        return text, segs, fb
+
+
+def transcribe_audio(audio_path: str, model: str) -> tuple[str, list, str]:
     """Transcribe an audio file, splitting into time-based chunks if it exceeds
-    the OpenAI size limit. Returns (raw_text, segments)."""
+    the OpenAI size limit. Returns (raw_text, segments, model_used)."""
     size = os.path.getsize(audio_path)
     if size <= MAX_AUDIO_BYTES:
         return _transcribe_one(audio_path, model)
@@ -289,22 +330,22 @@ def transcribe_audio(audio_path: str, model: str) -> tuple[str, list]:
 
     all_text: list[str] = []
     all_segs: list = []
+    models_used: set[str] = set()
     for i in range(num_chunks):
         start = i * chunk_dur
         chunk_path = f"{audio_path}.part{i}.mp3"
-        cmd = [
-            "ffmpeg", "-y", "-ss", str(start), "-t", str(chunk_dur),
-            "-i", audio_path, "-ac", "1", "-ar", "16000", "-b:a", "32k",
-            chunk_path,
-        ]
+        cmd = ["ffmpeg", "-y", "-ss", str(start), "-t", str(chunk_dur),
+               "-i", audio_path, *_AUDIO_CODEC, chunk_path]
         subprocess.run(cmd, check=True, capture_output=True)
         logger.info("Transcribing chunk %d/%d", i + 1, num_chunks)
-        text, segs = _transcribe_one(chunk_path, model)
+        text, segs, used = _transcribe_one(chunk_path, model)
         all_text.append(text)
         all_segs.extend(segs)
+        models_used.add(used)
         os.remove(chunk_path)
 
-    return "\n".join(t for t in all_text if t), all_segs
+    model_used = model if models_used == {model} else "+".join(sorted(models_used))
+    return "\n".join(t for t in all_text if t), all_segs, model_used
 
 
 def render_transcript(raw_text: str, segments: list) -> str:
@@ -432,17 +473,21 @@ def process_meeting_job(payload: dict) -> None:
         logger.info("Extracting audio with ffmpeg...")
         job_status[file_id]["step"] = "extract_audio"
         extract_audio(video_path, audio_path)
-        logger.info("Audio extracted: %.2f MB", os.path.getsize(audio_path) / 1024 / 1024)
+        audio_duration = verify_audio(audio_path)
+        logger.info("Audio extracted & verified: %.2f MB, %.0fs",
+                    os.path.getsize(audio_path) / 1024 / 1024, audio_duration)
 
         # 3. Transcribe ---------------------------------------------------
         logger.info("Transcription started (model=%s)", OPENAI_TRANSCRIBE_MODEL)
         job_status[file_id]["step"] = "transcribe"
-        raw_text, segments = transcribe_audio(audio_path, OPENAI_TRANSCRIBE_MODEL)
+        raw_text, segments, transcribe_model_used = transcribe_audio(
+            audio_path, OPENAI_TRANSCRIBE_MODEL
+        )
         transcript_text = render_transcript(raw_text, segments)
         segment_count = len(segments)
         logger.info(
-            "Transcription complete: %d segments, %d chars",
-            segment_count, len(transcript_text),
+            "Transcription complete (model=%s): %d segments, %d chars",
+            transcribe_model_used, segment_count, len(transcript_text),
         )
 
         # 4. Summarize ----------------------------------------------------
@@ -463,7 +508,7 @@ def process_meeting_job(payload: dict) -> None:
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "input_file_name": file_name,
             "input_size_mb": input_size_mb,
-            "transcribe_model": OPENAI_TRANSCRIBE_MODEL,
+            "transcribe_model": transcribe_model_used,
             "summary_model": OPENAI_SUMMARY_MODEL,
             "segment_count": segment_count,
             "output_files": out_names,
@@ -506,7 +551,7 @@ def process_meeting_job(payload: dict) -> None:
 # ---------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.5"}
+    return {"service": "bevco-meeting-transcriber", "status": "ok", "version": "2.1.6"}
 
 
 @app.get("/health")
