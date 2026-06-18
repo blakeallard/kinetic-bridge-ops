@@ -440,44 +440,16 @@ def health():
     return {"status": "healthy"}
 
 
+@app.get("/jobs")
+def jobs():
+    """All processing jobs seen since the last deploy (in-memory), newest-first
+    insertion order. Handy for watching a run without knowing its file_id."""
+    return job_status
+
+
 @app.get("/status/{file_id}")
 def status(file_id: str):
     return job_status.get(file_id, {"state": "unknown"})
-
-
-@app.get("/removed-endpoint")
-def debug_env():
-    """Diagnostic: reports which expected env vars are PRESENT and their length.
-    Never returns values. Remove once config is confirmed working."""
-    expected = [
-        "OPENAI_API_KEY", "OPENAI_TRANSCRIBE_MODEL", "OPENAI_SUMMARY_MODEL",
-        "ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN",
-        "ZOHO_ACCOUNTS_BASE_URL", "ZOHO_API_BASE_URL",
-    ]
-    present = {}
-    for name in expected:
-        val = os.getenv(name)
-        present[name] = {"set": bool(val), "length": len(val) if val else 0}
-    # Also list any env keys that look related, so name-mismatches are visible.
-    related_keys = sorted(
-        k for k in os.environ
-        if k.startswith(("OPENAI", "ZOHO")) and k not in expected
-    )
-    # Railway auto-injects these into the running container — non-secret.
-    # They reveal exactly which service + environment serves this domain.
-    railway = {
-        k: os.getenv(k)
-        for k in (
-            "RAILWAY_SERVICE_NAME", "RAILWAY_ENVIRONMENT_NAME",
-            "RAILWAY_PROJECT_NAME", "RAILWAY_PUBLIC_DOMAIN",
-            "RAILWAY_GIT_COMMIT_SHA",
-        )
-    }
-    return {
-        "expected": present,
-        "other_openai_zoho_keys": related_keys,
-        "railway": railway,
-    }
 
 
 @app.post("/process_meeting")
