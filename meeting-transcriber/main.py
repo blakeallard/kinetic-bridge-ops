@@ -163,6 +163,7 @@ def download_workdrive_file(download_url: str | None, file_id: str | None,
     if download_url:
         candidates.append(("payload_download_url", download_url))
     if file_id:
+        candidates.append(("api_content", f"{ZOHO_API_BASE_URL}/files/{file_id}/content"))
         try:
             meta_url = _metadata_download_url(file_id, token)
             if meta_url:
