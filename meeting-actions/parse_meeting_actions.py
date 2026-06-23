@@ -100,8 +100,14 @@ def parse_inline_format(section_text: str, meeting_date: str) -> list[dict]:
             task_text = line[: owner_match.start()].strip()
             owner_raw = owner_match.group(1)
         else:
-            task_text = line
-            owner_raw = "Unknown"
+            # Positional format: "task — Name — due date/notes"
+            parts = re.split(r"\s*[—–]\s*", line)
+            if len(parts) >= 2:
+                task_text = parts[0].strip()
+                owner_raw = parts[1].strip()
+            else:
+                task_text = line
+                owner_raw = "Unknown"
         owner = resolve_owner(owner_raw)
         items.append(_make_item(task_text, owner, meeting_date, owner_raw))
     return items

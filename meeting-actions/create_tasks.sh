@@ -228,12 +228,79 @@ successes = 0
 
 BLAKE_ZPUID = "2543412000001324206"
 
+# Fetch existing task names once so we can skip duplicates.
+# Uses the Zoho API directly (paginated) to avoid Claude CLI truncation.
+existing_names = set()
+if not dry_run:
+    import ssl, urllib.parse, urllib.request
+    try:
+        import certifi
+        _ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        _ssl_ctx = ssl.create_default_context()
+
+    def _load_env(env_path):
+        env = {}
+        try:
+            for line in open(env_path).read().splitlines():
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                k, v = line.split('=', 1)
+                env[k.strip()] = v.strip().strip('"').strip("'")
+        except Exception:
+            pass
+        return env
+
+    def _zoho_token(env):
+        domain = env.get('ZOHO_ACCOUNTS_DOMAIN', 'https://accounts.zoho.com')
+        data = urllib.parse.urlencode({
+            'grant_type': 'refresh_token',
+            'client_id': env['ZOHO_CLIENT_ID'],
+            'client_secret': env['ZOHO_CLIENT_SECRET'],
+            'refresh_token': env['ZOHO_REFRESH_TOKEN'],
+        }).encode()
+        req = urllib.request.Request(
+            f'{domain}/oauth/v2/token', data=data, method='POST',
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+        )
+        with urllib.request.urlopen(req, timeout=30, context=_ssl_ctx) as r:
+            return json.loads(r.read())['access_token']
+
+    print("[dedup] Fetching existing tasks from Zoho (all pages)...")
+    ENV_FILE = '/Users/blakeallard/bevco/scripts/zoho_task_folder_sync/.env'
+    env = _load_env(ENV_FILE)
+    try:
+        token = _zoho_token(env)
+        api = env.get('ZOHO_PROJECTS_API_DOMAIN', 'https://projectsapi.zoho.com')
+        index = 1
+        page_size = 100
+        while True:
+            url = (f'{api}/restapi/portal/898600220/projects/2543412000001324010/tasks/'
+                   f'?index={index}&range={page_size}')
+            req = urllib.request.Request(url, headers={'Authorization': f'Zoho-oauthtoken {token}'})
+            with urllib.request.urlopen(req, timeout=30, context=_ssl_ctx) as r:
+                tasks = json.loads(r.read()).get('tasks', [])
+            for t in tasks:
+                name = t.get('name', '').strip()
+                if name:
+                    existing_names.add(name.lower())
+            if len(tasks) < page_size:
+                break
+            index += page_size
+    except Exception as e:
+        print(f"[dedup] Warning: could not fetch existing tasks ({e}) — skipping dedup.")
+    print(f"[dedup] {len(existing_names)} existing task names loaded.")
+
 for i, item in enumerate(items, 1):
     if item.get('is_fallback', True):
         print(f"  [{i}/{len(items)}] SKIP (unresolved owner: {item['owner_display']})")
         continue
     if blake_only and item['owner_zpuid'] != BLAKE_ZPUID:
         print(f"  [{i}/{len(items)}] SKIP (not Blake: {item['owner_display']})")
+        continue
+    if not dry_run and item['name'].strip().lower() in existing_names:
+        print(f"  [{i}/{len(items)}] SKIP (duplicate: '{item['name'][:60]}' already exists in Zoho)")
         continue
     if dry_run:
         print(f"  [{i}/{len(items)}] DRY-RUN: {item['name'][:80]}")
