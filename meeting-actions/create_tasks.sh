@@ -97,9 +97,9 @@ fi
 
 already=$(python3 -c "
 import json, sys
-state = json.load(open('$STATE_FILE'))
-print('yes' if '$BASENAME' in state['processed'] else 'no')
-")
+state = json.load(open(sys.argv[1]))
+print('yes' if sys.argv[2] in state['processed'] else 'no')
+" "$STATE_FILE" "$BASENAME")
 
 if [[ "$already" == "yes" ]]; then
   emit_event "detect_meeting_summary" "Detect Meeting Summary" "skipped" \

@@ -187,6 +187,7 @@ def format_worksheet_html(ws: dict, item: dict) -> str:
         f"<b>1. REQUEST + DESIRED WORKFLOW</b><br/>"
         f"<b>Requested task:</b> {ws.get('requested_task', item['name'])}<br/>"
         f"<b>Business problem:</b> {ws.get('business_problem', '')}<br/>"
+        f"<br/>"
         f"<b>How should this work:</b> {ws.get('how_should_work', '')}<br/>"
         f"<b>Success / done criteria:</b> {ws.get('success_criteria', '')}<br/>"
         f"<br/>"
