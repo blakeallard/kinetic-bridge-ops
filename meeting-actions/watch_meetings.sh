@@ -43,7 +43,7 @@ log "=== Meeting watcher triggered ==="
 while IFS= read -r filepath; do
     [[ -z "$filepath" ]] && continue
     log "Processing: $(basename "$filepath")"
-    if "$SCRIPT_DIR/create_tasks.sh" "$filepath" --worksheet >> "$LOG" 2>&1; then
+    if "$SCRIPT_DIR/create_tasks.sh" "$filepath" --worksheet --blake-only >> "$LOG" 2>&1; then
         log "Done: $(basename "$filepath")"
     else
         log "FAILED: $(basename "$filepath") (exit $?)"
