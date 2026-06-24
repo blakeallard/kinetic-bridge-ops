@@ -1,0 +1,4 @@
+.env
+*.log
+status_poller_state.json
+__pycache__/
