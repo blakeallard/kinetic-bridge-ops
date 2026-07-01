@@ -1,0 +1,51 @@
+{
+  "dry_run": true,
+  "portal_id": "898600220",
+  "project_id": "2543412000001324010",
+  "status": {
+    "name": "Needs Review",
+    "id": null
+  },
+  "tags": [
+    {
+      "name": "automation",
+      "id": "2543412000001391053"
+    },
+    {
+      "name": "internal-work",
+      "id": "2543412000001391061"
+    },
+    {
+      "name": "meeting-action",
+      "id": null
+    },
+    {
+      "name": "zoho-ai-generated",
+      "id": null
+    },
+    {
+      "name": "needs-review",
+      "id": null
+    }
+  ],
+  "task_parameters": {
+    "name": "Website Planning Meeting - Build website routing flow",
+    "description": "Source: Zoho AI meeting summary\nSummary file: known_owner_summary.txt\nMeeting name: Website Planning Meeting\nOriginal action text: Build website routing flow\nOwner raw: Blake\nOwner resolution: matched\nDetected owners: Blake (resolution=matched; canonical_name=Blake Allard; owner_id=2543412000001324206)\nDue date text: Friday\nDue date calculation: Not performed\nAction hash: 202e3eb54a60abcdc7352601c46935d0b2f3e64b6acb760bd3c6a35255043fb8\n\nWorkflow Diagnostic\nRequested task: Needs Review\nBusiness problem: Needs Review\nDesired workflow: Needs Review\nSuccess criteria: Needs Review\nCurrent status: Needs Review\nProblem type: Needs Review\nSystems involved: Needs Review\nData needed: Needs Review\nAccess / approval needed: Needs Review\nInformation between systems: Needs Review\nOne-sentence diagnosis: Needs Review\nNext action: Needs Review",
+    "tagIds": [
+      "2543412000001391053",
+      "2543412000001391061"
+    ],
+    "person_responsible": "2543412000001324206"
+  },
+  "validation": {
+    "ready_for_live": false,
+    "missing_status_id": true,
+    "missing_tag_ids": [
+      "meeting-action",
+      "zoho-ai-generated",
+      "needs-review"
+    ],
+    "owner_assignment": "matched"
+  }
+}
+
