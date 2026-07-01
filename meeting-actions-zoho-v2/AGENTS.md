@@ -11,7 +11,7 @@ This repository is the independent Zoho-only v2 meeting-actions pipeline. Build 
 
 ## Current Phase
 
-The current phase is documentation and design only. Do not add parser, Deluge, OAuth, Zoho API, watcher, Flow, or task-creation implementation until the documentation deliverables have been reviewed.
+The current phase permits only a local deterministic dry-run parser, sanitized fixtures, expected JSON, and parser tests. Do not add Deluge, OAuth, Zoho API, watcher, Flow, registry, or task-creation implementation until that work is separately requested.
 
 ## Safety Defaults
 

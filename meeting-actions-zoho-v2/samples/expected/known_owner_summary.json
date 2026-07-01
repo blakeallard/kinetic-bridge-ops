@@ -1,0 +1,37 @@
+[
+  {
+    "action_text": "Build website routing flow",
+    "owner_raw": "Blake",
+    "owner_resolution": "matched",
+    "owner_id": "2543412000001324206",
+    "detected_owners": [
+      {
+        "name": "Blake",
+        "canonical_name": "Blake Allard",
+        "owner_id": "2543412000001324206",
+        "resolution": "matched"
+      }
+    ],
+    "due_date_text": "Friday",
+    "source_file_name": "known_owner_summary.txt",
+    "action_hash": "202e3eb54a60abcdc7352601c46935d0b2f3e64b6acb760bd3c6a35255043fb8"
+  },
+  {
+    "action_text": "Review Zoho-only task pipeline",
+    "owner_raw": "Bill",
+    "owner_resolution": "matched",
+    "owner_id": "2543412000000059003",
+    "detected_owners": [
+      {
+        "name": "Bill",
+        "canonical_name": "Bill Beverley",
+        "owner_id": "2543412000000059003",
+        "resolution": "matched"
+      }
+    ],
+    "due_date_text": null,
+    "source_file_name": "known_owner_summary.txt",
+    "action_hash": "c5e49509706c35051780df58b14455f3d5a5dc5bbdd83972aae2e4e689868757"
+  }
+]
+

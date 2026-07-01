@@ -1,0 +1,37 @@
+[
+  {
+    "action_text": "Send the updated scope",
+    "owner_raw": "Bryan",
+    "owner_resolution": "matched",
+    "owner_id": "2543412000000108001",
+    "detected_owners": [
+      {
+        "name": "Bryan",
+        "canonical_name": "Bryan Ovalle",
+        "owner_id": "2543412000000108001",
+        "resolution": "matched"
+      }
+    ],
+    "due_date_text": null,
+    "source_file_name": "section_boundaries_summary.txt",
+    "action_hash": "03b67e2542afeda57a841ce3ed7c7c2d2094df9240b1891e0af95590a2d6b204"
+  },
+  {
+    "action_text": "Publish QA results",
+    "owner_raw": "Brian",
+    "owner_resolution": "matched",
+    "owner_id": "2543412000000108001",
+    "detected_owners": [
+      {
+        "name": "Brian",
+        "canonical_name": "Bryan Ovalle",
+        "owner_id": "2543412000000108001",
+        "resolution": "matched"
+      }
+    ],
+    "due_date_text": "2026-07-10",
+    "source_file_name": "section_boundaries_summary.txt",
+    "action_hash": "0e33a864a74871a6dd95dfe2abb916674ca298c7564598eff65886f7a958fa55"
+  }
+]
+

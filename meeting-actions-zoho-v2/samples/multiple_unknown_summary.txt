@@ -1,0 +1,12 @@
+Partner Automation Review
+
+Next Actions:
+
+* Prepare the test matrix — Owner: Blake Allard and Bill Beverley — Due: next Tuesday
+* Confirm vendor access — Owner: Taylor Morgan
+* Document handoff notes
+
+Risks and Blockers
+
+* This bullet under an unrelated heading must not become an action.
+

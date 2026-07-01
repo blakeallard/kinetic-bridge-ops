@@ -6,7 +6,7 @@ The primary question is: **Can Zoho-generated meeting summaries produce usable Z
 
 ## Status
 
-Design phase only. This repository currently contains project documentation and read-only v1 reference files. It does not contain parser or API implementation code and must not make live Zoho calls.
+Local dry-run parser phase. This repository contains a deterministic local parser, sanitized fixtures, expected JSON, project documentation, and read-only v1 reference files. It contains no Zoho/API integration and must not make live Zoho calls.
 
 The existing production `meeting-actions` repository identified in the project brief remains independent and unchanged.
 
@@ -40,6 +40,37 @@ The initial version will:
 
 It will not interpret transcripts, infer missing work, generate worksheet answers with an LLM, or replace the v1 pipeline.
 
+## Run the Local Dry-Run Parser
+
+Python 3.10 or newer is sufficient; the parser uses only the standard library.
+
+```bash
+python3 scripts/parse_summary.py samples/known_owner_summary.txt
+```
+
+Pass multiple local `_summary.txt` files to return one combined JSON array:
+
+```bash
+python3 scripts/parse_summary.py samples/known_owner_summary.txt samples/multiple_unknown_summary.txt
+```
+
+The parser reads only the named files and writes JSON to stdout. It does not call a network service, create a task, or update processing state. Files without the `_summary.txt` suffix are rejected.
+
+Each output item contains the explicit action text, raw owner text, owner resolution, optional known owner ID, all detected owners, unmodified due-date text, source file name, and action hash. `owner_resolution` is one of:
+
+- `matched`: exactly one owner matched the known map;
+- `unresolved`: exactly one explicit owner was unknown;
+- `multiple`: more than one distinct owner was explicit, so `owner_id` is null; or
+- `missing`: no owner was explicit.
+
+`action_hash` is SHA-256 over the normalized source filename and normalized action text. Repeated identical actions in one source intentionally share a hash for future idempotency.
+
+Run the sample parity test with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
 ## Task Contract
 
 Each candidate task is expected to have:
@@ -64,14 +95,18 @@ README.md                               Project overview
 docs/architecture.md                    Target system and data contracts
 docs/migration_plan.md                  Staged, non-disruptive rollout plan
 docs/parity_checklist.md                v1-to-v2 behavior comparison
+scripts/parse_summary.py                Local JSON dry-run parser
+samples/*_summary.txt                   Sanitized parser inputs
+samples/expected/*.json                 Checked-in expected outputs
+tests/test_samples.py                   Fixture parity test
 legacy_*                                Read-only v1 reference files
 ```
 
 ## Planned Build Sequence
 
 1. Review and approve the documentation in this repository.
-2. Build a local, deterministic dry-run parser.
-3. Add sanitized summary fixtures and expected JSON outputs.
+2. Build a local, deterministic dry-run parser. (Complete)
+3. Add sanitized summary fixtures and expected JSON outputs. (Complete)
 4. Translate the validated parser rules to Deluge.
 5. Build and validate task payload generation.
 6. Implement the processed-file registry and action idempotency design.
