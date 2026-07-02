@@ -37,3 +37,6 @@ Manual validation package:
 - docs/zoho_deluge_parser.md (existing blocker and parser contract)
 - samples/deluge/stage8_workdrive_flow_input.json
 - samples/deluge/stage8_expected_projection.json
+
+Shared GitHub task log:
+- Stage 9C issue: https://github.com/blake-bevco-tech/meeting-actions-zoho-v2/issues/1
