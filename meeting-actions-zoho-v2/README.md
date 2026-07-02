@@ -98,7 +98,9 @@ docs/parity_checklist.md                v1-to-v2 behavior comparison
 docs/projects_payload_builder.md        Projects payload contract
 docs/duplicate_registry.md              Local idempotency/report contract
 docs/live_create_task_guard.md          Stage 6 live guard and blockers
+docs/workdrive_real_file_test.md        Stage 7 real WorkDrive-file dry-run procedure
 scripts/parse_summary.py                Local JSON dry-run parser
+scripts/run_workdrive_dry_run.py        Local WorkDrive-file pipeline orchestrator
 scripts/build_projects_payloads.py      Dry-run Projects payload builder
 scripts/build_registry_report.py        Local duplicate/report layer
 scripts/create_tasks_guarded.py         Two-key create-task scaffold
@@ -112,15 +114,15 @@ legacy_*                                Read-only v1 reference files
 
 ## Planned Build Sequence
 
-1. Review and approve the documentation in this repository.
-2. Build a local, deterministic dry-run parser. (Complete)
-3. Add sanitized summary fixtures and expected JSON outputs. (Complete)
-4. Translate the validated parser rules to Deluge. (Draft complete)
-5. Build and validate task payload generation. (Complete)
-6. Implement the processed-file registry and action idempotency design. (Local dry-run complete)
-7. Add live task creation behind an explicit live-mode gate. (Scaffold complete; locked)
+1. Establish the planning and safety baseline. (Complete)
+2. Build the local deterministic parser and fixtures. (Complete)
+3. Translate the validated parser rules to Deluge. (Draft complete)
+4. Build and validate task payload generation. (Complete)
+5. Implement the local duplicate registry and report layer. (Complete)
+6. Add task creation behind the two-key live-mode guard. (Scaffold complete; dry-run default)
+7. Validate the real WorkDrive-file dry-run path. (Complete)
 8. Document and configure Zoho Flow or the WorkDrive workflow.
-9. Validate one Blake-only summary, then three representative real summaries.
+9. Run separately authorized live pilot validation.
 10. Remove the Blake-only rollout restriction only after human review.
 
 No step in this sequence requires stopping or modifying v1.

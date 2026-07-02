@@ -1,0 +1,11 @@
+[Sanitized real-file fixture. Accepted only with verified source folder "06-30 - Blake's Weekly Catch-Up"; otherwise reject as non-target.]
+
+1. The team reviewed an internal workflow and its current implementation.
+2. Several data-quality and automation concerns were discussed.
+3. Key next steps include testing field population accuracy, implementing automated updates, and refining lookup functionality.
+
+- The current process still requires manual validation in several places.
+- Key next steps: validate field accuracy, implement automated imports, and refine routing logic.
+- Another next-steps sentence appears in ordinary prose rather than under an approved action heading.
+
+[The downloaded WorkDrive source contained no standalone Action Items, Action Item, Next Actions, or Next Steps heading.]
