@@ -43,8 +43,8 @@ Exit gate: local and Deluge dry-run outputs match for all agreed fixtures, or ev
 Under explicit authorization, inspect configuration without creating tasks:
 
 - confirm portal and project IDs;
-- identify the exact `Needs Review` status/status ID;
-- confirm existing tag IDs and create/identify IDs for `meeting-action`, `zoho-ai-generated`, and `needs-review` only with separate approval;
+- identify the exact `In Progress` status/status ID;
+- confirm existing tag IDs and create/identify IDs for `meeting-action` and `zoho-ai-generated` only with separate approval;
 - verify whether a task may be unassigned;
 - verify field lengths and accepted description format;
 - select Creator or Sheet for the registry; and
@@ -70,7 +70,7 @@ Pilot sequence:
 
 1. Review a dry-run payload for one Blake-only summary.
 2. Enable one controlled live execution.
-3. Confirm task name, `Needs Review` status, tags, owner handling, empty due date, source fields, and registry/action hashes.
+3. Confirm task name, `In Progress` status, tags, owner handling, empty due date, source fields, and registry/action hashes.
 4. Replay the event and confirm that zero duplicate tasks are created.
 5. Compare v2 candidates with the source summary and any v1 result; do not route the same event to two live task creators unless duplicate isolation is proven.
 
@@ -80,7 +80,7 @@ Exit gate: the one-file pilot is accurate, traceable, idempotent, and leaves v1 
 
 Run dry-run review followed by separately approved live validation on three representative real summaries: known owner, unknown/multiple owner, and mixed or absent due-date text. Record false positives, false negatives, metadata quality, assignment decisions, and reviewer corrections.
 
-Exit gate: agreed task-quality thresholds are met and all failures remain safely in `Needs Review` or are skipped with a clear reason.
+Exit gate: agreed task-quality thresholds are met and all failures remain safely in `In Progress` or are skipped with a clear reason.
 
 ## Phase 7 — Limited Rollout
 
@@ -112,6 +112,5 @@ Each promotion decision should include:
 - unknown/fallback owner counts;
 - duplicate replay results;
 - source-to-task traceability checks;
-- confirmation that all tasks begin in `Needs Review`; and
+- confirmation that all tasks begin in `In Progress`; and
 - confirmation that v1 behavior and files are unchanged.
-

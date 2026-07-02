@@ -30,7 +30,7 @@ Zoho Meeting recording
 → WorkDrive workflow or Zoho Flow trigger detects new `_summary.txt`
 → Deluge parser extracts explicit action items
 → Zoho Projects task created through Zoho API / Deluge integration
-→ task status = Needs Review
+→ task status = In Progress
 → human validates task quality
 
 ## Primary Validation Question
@@ -48,7 +48,7 @@ Can Zoho-generated meeting summaries produce usable Zoho Projects tasks without 
 7. Only create tasks from explicit action items.
 8. Do not infer owners unless clearly stated.
 9. Do not infer due dates unless explicitly stated.
-10. All created tasks must start in Needs Review.
+10. All created tasks must start in In Progress.
 11. Preserve source file traceability in task descriptions.
 12. Prevent duplicate processing.
 13. Default everything to dry-run.
@@ -148,7 +148,7 @@ Task name:
 
 Status:
 
-Needs Review
+In Progress
 
 Tags:
 
@@ -156,7 +156,6 @@ automation
 internal-work
 meeting-action
 zoho-ai-generated
-needs-review
 
 Description must include:
 
@@ -168,7 +167,7 @@ Owner detected
 Owner resolution
 Due date text
 Original action text
-Workflow Diagnostic fields marked Needs Review
+Workflow Diagnostic fields set to Not provided
 
 ## Duplicate Prevention
 

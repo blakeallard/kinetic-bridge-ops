@@ -6,7 +6,7 @@ The primary question is: **Can Zoho-generated meeting summaries produce usable Z
 
 ## Status
 
-Local dry-run parser phase. This repository contains a deterministic local parser, sanitized fixtures, expected JSON, project documentation, and read-only v1 reference files. It contains no Zoho/API integration and must not make live Zoho calls.
+Stage 6 guarded-integration scaffold. The repository contains the validated local parser, Deluge draft, payload builder, in-memory duplicate registry, and a two-key create-task guard. Dry-run remains the default, current payloads are blocked from live creation, and no live Zoho call has been made.
 
 The existing production `meeting-actions` repository identified in the project brief remains independent and unchanged.
 
@@ -19,7 +19,7 @@ Zoho Meeting
   -> Deluge action-item parser
   -> dry-run task payload and validation
   -> Zoho Projects task creation (future, explicitly enabled)
-  -> Needs Review
+  -> In Progress
   -> human validation
 ```
 
@@ -34,9 +34,9 @@ The initial version will:
 - create candidates only from explicit bullet actions;
 - resolve only clearly stated known owners;
 - preserve, but not calculate, due-date text;
-- prepare tasks in `Needs Review` with source and diagnostic fields;
+- prepare tasks in `In Progress` with source and diagnostic fields;
 - prevent file- and action-level duplicates; and
-- remain dry-run unless live mode is explicitly enabled in a later approved phase.
+- remain dry-run unless live mode is explicitly unlocked and every payload has verified status/tag configuration.
 
 It will not interpret transcripts, infer missing work, generate worksheet answers with an LLM, or replace the v1 pipeline.
 
@@ -76,15 +76,15 @@ python3 -m unittest discover -s tests -v
 Each candidate task is expected to have:
 
 - name: `[Meeting] - [Action Text]`;
-- status: `Needs Review`;
-- tags: `automation`, `internal-work`, `meeting-action`, `zoho-ai-generated`, and `needs-review`;
+- status: `In Progress`;
+- tags: `automation`, `internal-work`, `meeting-action`, and `zoho-ai-generated`;
 - a known owner, an unassigned owner, or a documented Blake fallback only when assignment is mandatory;
 - no computed due date in the initial version; and
-- a description containing the source type, file identity, meeting identity/date, detected and resolved owner, raw due text, original action text, and Workflow Diagnostic fields marked `Needs Review`.
+- a description containing the source type, file identity, meeting identity/date, detected and resolved owner, raw due text, original action text, and Workflow Diagnostic fields set to `Not provided`.
 
 ## Safety Model
 
-Dry-run is the default and must not create a task, task list, registry row, attachment, or any other external object. Live creation is a future gated capability, not a current feature. Secrets and local machine paths must never be committed or hardcoded.
+Dry-run is the default and must not create a task, task list, registry row, attachment, or any other external object. The guarded live scaffold requires both `--live` and `LIVE_ZOHO_TASK_CREATE=true`, but current payloads remain blocked until the `In Progress` status ID and missing tag IDs are verified. Secrets and local machine paths must never be committed or hardcoded.
 
 ## Repository Layout
 
@@ -95,10 +95,18 @@ README.md                               Project overview
 docs/architecture.md                    Target system and data contracts
 docs/migration_plan.md                  Staged, non-disruptive rollout plan
 docs/parity_checklist.md                v1-to-v2 behavior comparison
+docs/projects_payload_builder.md        Projects payload contract
+docs/duplicate_registry.md              Local idempotency/report contract
+docs/live_create_task_guard.md          Stage 6 live guard and blockers
 scripts/parse_summary.py                Local JSON dry-run parser
+scripts/build_projects_payloads.py      Dry-run Projects payload builder
+scripts/build_registry_report.py        Local duplicate/report layer
+scripts/create_tasks_guarded.py         Two-key create-task scaffold
 samples/*_summary.txt                   Sanitized parser inputs
 samples/expected/*.json                 Checked-in expected outputs
-tests/test_samples.py                   Fixture parity test
+samples/payloads/*.json                 Dry-run payload fixtures
+samples/registry/*.json                 Local registry fixtures
+tests/                                  Parser, payload, registry, and guard tests
 legacy_*                                Read-only v1 reference files
 ```
 
@@ -107,10 +115,10 @@ legacy_*                                Read-only v1 reference files
 1. Review and approve the documentation in this repository.
 2. Build a local, deterministic dry-run parser. (Complete)
 3. Add sanitized summary fixtures and expected JSON outputs. (Complete)
-4. Translate the validated parser rules to Deluge.
-5. Build and validate task payload generation.
-6. Implement the processed-file registry and action idempotency design.
-7. Add live task creation behind an explicit live-mode gate.
+4. Translate the validated parser rules to Deluge. (Draft complete)
+5. Build and validate task payload generation. (Complete)
+6. Implement the processed-file registry and action idempotency design. (Local dry-run complete)
+7. Add live task creation behind an explicit live-mode gate. (Scaffold complete; locked)
 8. Document and configure Zoho Flow or the WorkDrive workflow.
 9. Validate one Blake-only summary, then three representative real summaries.
 10. Remove the Blake-only rollout restriction only after human review.

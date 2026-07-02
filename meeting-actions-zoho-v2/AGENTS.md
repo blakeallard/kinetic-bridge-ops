@@ -11,7 +11,7 @@ This repository is the independent Zoho-only v2 meeting-actions pipeline. Build 
 
 ## Current Phase
 
-The current phase permits only a local deterministic dry-run parser, sanitized fixtures, expected JSON, and parser tests. Do not add Deluge, OAuth, Zoho API, watcher, Flow, registry, or task-creation implementation until that work is separately requested.
+The current phase includes the local parser, Deluge parser draft, payload builder, in-memory duplicate registry, and guarded create-task scaffold. Do not add Flow/WorkDrive wiring, registry persistence, token refresh, or make a live Zoho call until separately requested. Live creation must remain blocked until the `In Progress` custom status ID and all required tag IDs are verified.
 
 ## Safety Defaults
 
@@ -19,7 +19,7 @@ The current phase permits only a local deterministic dry-run parser, sanitized f
 - Dry-run must perform no external writes, create no Zoho objects, and make no processed-registry mutations.
 - Do not make live Zoho API calls until the user explicitly authorizes the live integration phase.
 - A live mode must require an explicit positive opt-in; an omitted, empty, or unrecognized setting must remain dry-run.
-- Tasks eventually created by v2 must start in `Needs Review` and retain source traceability.
+- Tasks eventually created by v2 must start in `In Progress` and retain source traceability.
 
 ## Secrets and Configuration
 

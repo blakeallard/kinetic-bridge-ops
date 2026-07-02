@@ -19,7 +19,8 @@ from typing import Any, Mapping, Sequence
 
 PORTAL_ID = "898600220"
 PROJECT_ID = "2543412000001324010"
-STATUS_NAME = "Needs Review"
+STATUS_NAME = "In Progress"
+DIAGNOSTIC_PLACEHOLDER = "Not provided"
 
 KNOWN_OWNER_IDS: Mapping[str, str] = MappingProxyType(
     {
@@ -41,7 +42,6 @@ REQUIRED_TAG_NAMES = (
     "internal-work",
     "meeting-action",
     "zoho-ai-generated",
-    "needs-review",
 )
 
 WORKFLOW_DIAGNOSTIC_FIELDS = (
@@ -151,7 +151,10 @@ def _build_description(item: Mapping[str, Any], meeting_name: str) -> str:
         "",
         "Workflow Diagnostic",
     ]
-    lines.extend(f"{field}: {STATUS_NAME}" for field in WORKFLOW_DIAGNOSTIC_FIELDS)
+    lines.extend(
+        f"{field}: {DIAGNOSTIC_PLACEHOLDER}"
+        for field in WORKFLOW_DIAGNOSTIC_FIELDS
+    )
     return "\n".join(lines)
 
 
@@ -210,7 +213,7 @@ def build_task_payload(
         "dry_run": True,
         "portal_id": config.portal_id,
         "project_id": config.project_id,
-        "status": {"name": config.status_name, "id": None},
+        "status": {"name": config.status_name, "id": None, "verified": False},
         "tags": configured_tags,
         "task_parameters": task_parameters,
         "validation": {
@@ -267,4 +270,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

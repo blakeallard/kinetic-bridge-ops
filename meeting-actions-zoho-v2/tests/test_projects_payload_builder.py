@@ -47,15 +47,18 @@ class ProjectsPayloadBuilderTests(unittest.TestCase):
             self.assertNotIn("person_responsible", payload["task_parameters"])
             self.assertEqual(payload["validation"]["owner_assignment"], "unassigned")
 
-    def test_every_payload_is_needs_review_and_not_live_ready(self) -> None:
+    def test_every_payload_is_in_progress_and_not_live_ready(self) -> None:
         items = load_json(ROOT / "samples/expected/multiple_unknown_summary.json")
         for payload in BUILDER.build_task_payloads(items, meeting_name="Review"):
             self.assertTrue(payload["dry_run"])
-            self.assertEqual(payload["status"], {"name": "Needs Review", "id": None})
+            self.assertEqual(
+                payload["status"],
+                {"name": "In Progress", "id": None, "verified": False},
+            )
             self.assertFalse(payload["validation"]["ready_for_live"])
             description = payload["task_parameters"]["description"]
             for field in BUILDER.WORKFLOW_DIAGNOSTIC_FIELDS:
-                self.assertIn(f"{field}: Needs Review", description)
+                self.assertIn(f"{field}: Not provided", description)
 
     def test_nonmatched_resolution_never_assigns_owner(self) -> None:
         item = load_json(ROOT / "samples/expected/multiple_unknown_summary.json")[1]

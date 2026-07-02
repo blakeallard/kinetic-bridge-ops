@@ -14,13 +14,13 @@ Non-secret configuration is centralized in constants and `ProjectsPayloadConfig`
 | --- | --- |
 | Portal ID | `898600220` |
 | Project ID | `2543412000001324010` |
-| Status name | Always `Needs Review` |
+| Status name | Always `In Progress` |
 | Known owners | Blake Allard, Bill Beverley, Bryan Ovalle IDs from the project brief |
 | Known tag IDs | `automation` and `internal-work` |
-| Required tags without verified IDs | `meeting-action`, `zoho-ai-generated`, `needs-review` |
+| Required tags without verified IDs | `meeting-action`, `zoho-ai-generated` |
 | Maximum task name length | 250 characters, pending live Zoho verification |
 
-These values are identifiers, not secrets. The builder contains no credentials, tokens, API keys, endpoints, or local machine paths. A configuration with any status other than `Needs Review` is rejected.
+These values are identifiers, not secrets. The builder contains no credentials, tokens, API keys, endpoints, or local machine paths. A configuration with any status other than `In Progress` is rejected.
 
 ## Input Contract
 
@@ -53,7 +53,7 @@ Every result is an inert envelope:
   dry_run: true,
   portal_id: "...",
   project_id: "...",
-  status: {name: "Needs Review", id: null},
+  status: {name: "In Progress", id: null, verified: false},
   tags: [{name: "automation", id: "..."}, ...],
   task_parameters: {
     name: "Meeting name - Explicit action",
@@ -72,7 +72,7 @@ Every result is an inert envelope:
 
 The official Projects create-task documentation names `name`, `description`, optional `person_responsible`, and `tagIds` as request parameters. `task_parameters` uses those documented names. The surrounding envelope is an internal dry-run contract, not a request body and not authorization to send anything.
 
-The current create-task documentation does not establish how this project should set its custom `Needs Review` status during creation. The builder therefore records the required status intent but leaves its ID null and marks every payload not live-ready. The three required tag names whose IDs are not yet known receive null IDs and are also reported as blockers. Only the two verified tag IDs appear in `task_parameters.tagIds`.
+The current create-task documentation does not establish how this project should set its custom `In Progress` status during creation. The builder therefore records the required status intent but leaves its ID null and marks every payload not live-ready. The two required tag names whose IDs are not yet known receive null IDs and are also reported as blockers. Only the two verified tag IDs appear in `task_parameters.tagIds`.
 
 ## Owner Assignment
 
@@ -100,7 +100,7 @@ The deterministic plain-text description preserves:
 - raw due-date text and an explicit statement that no date calculation occurred; and
 - action hash.
 
-It then includes these Workflow Diagnostic fields, each set to `Needs Review`:
+It then includes these Workflow Diagnostic fields, each set to `Not provided`:
 
 - Requested task
 - Business problem
@@ -150,4 +150,3 @@ The tests cover matched assignment, missing/unresolved/multiple unassignment, di
 
 - [Zoho Projects Tasks API](https://www.zoho.com/projects/help/rest-api/tasks-api.html)
 - [Zoho Projects Tags API](https://www.zoho.com/projects/help/rest-api/tags.html)
-

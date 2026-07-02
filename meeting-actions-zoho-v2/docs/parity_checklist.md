@@ -16,17 +16,17 @@
 | Bullet formats | Top-level hyphen bullets with nested owner; inline owner; positional em-dash form | Nested owner/due and inline owner/positional owner forms explicitly documented | Preserve with stricter grammar | Fixture coverage for supported hyphen, bullet, en dash, and em dash shapes |
 | Explicit actions | All top-level bullets found inside extracted section become items | Only explicit action bullets; ambiguous/narrative text is skipped | Tighten | Negative fixtures show no tasks for narrative, decisions, or metadata |
 | LLM interpretation | Optional Claude worksheet generation from meeting context | No Claude/OpenAI/external LLM | Drop | Dependency and network review finds no external LLM path |
-| Workflow worksheet | Claude may fill diagnostic fields; basic fallback has meeting/action/owner only | Retain diagnostic field names but set each to `Needs Review` for humans | Replace | Candidate description contains every agreed field without invented content |
+| Workflow worksheet | Claude may fill diagnostic fields; basic fallback has meeting/action/owner only | Retain diagnostic field names but set each to `Not provided` | Replace | Candidate description contains every agreed field without invented content |
 | Owner aliases | Maps Blake, Bill, Bryan/Brian aliases to known Zoho IDs | Retain the documented alias map as configuration | Preserve | Case-insensitive alias tests return exact configured IDs |
 | Multiple owners | v1 selects the first parsed owner | Do not silently discard ambiguity; preserve raw owner text and use only a clearly supported primary owner rule | Tighten / decision needed | Multiple-owner fixture is either explicitly resolved by approved rule or marked unresolved |
 | Unknown owner parsing | Parser assigns Blake as fallback and marks `is_fallback` | Prefer unassigned; use configured Blake fallback only if Zoho mandates assignment, and label it | Replace | Unknown-owner dry run shows `unassigned`; fallback test is explicit and labeled |
-| Unknown owner execution | Task creation skips all fallback/unresolved items | v2 may create an unassigned `Needs Review` task when supported | Replace | Pilot verifies actual Zoho unassigned behavior before live use |
+| Unknown owner execution | Task creation skips all fallback/unresolved items | v2 may create an unassigned `In Progress` task when supported | Replace | Pilot verifies actual Zoho unassigned behavior before live use |
 | Missing owner | Parsed as `Unknown`, then skipped by live v1 creator | Preserve unresolved state; never infer from meeting prose | Tighten | Missing-owner fixture contains no detected owner and no inferred ID |
 | Due date | Positional trailing text is effectively discarded; no task due date is set | Preserve raw due text in description; do not calculate relative dates initially | Replace | `Friday` and explicit-date fixtures preserve exact text with no due-date payload |
-| Meeting date | Uses sibling metadata, special filename patterns, parent folder, or even a hardcoded 2026 fallback | Prefer authoritative WorkDrive/event metadata; never fabricate a date | Replace | Missing-date fixture returns unknown/Needs Review rather than an invented year |
+| Meeting date | Uses sibling metadata, special filename patterns, parent folder, or even a hardcoded 2026 fallback | Prefer authoritative WorkDrive/event metadata; never fabricate a date | Replace | Missing-date fixture returns unknown rather than an invented year |
 | Task name | Raw action, truncated to 250 characters | `[Meeting] - [Action Text]`, safely constrained to verified Zoho limits | Replace | Expected payload includes prefix and deterministic safe truncation behavior |
-| Status | No explicit `Needs Review` status in create prompt | Every task starts in `Needs Review` | Add required behavior | Controlled pilot reads back exact status before rollout |
-| Tags | Adds `automation` and `internal-work` by ID | Add those plus `meeting-action`, `zoho-ai-generated`, `needs-review` | Extend | Dry-run names all five; live pilot confirms IDs/readback |
+| Status | No explicit `In Progress` status in create prompt | Every task starts in `In Progress` | Add required behavior | Controlled pilot reads back exact status before rollout |
+| Tags | Adds `automation` and `internal-work` by ID | Add those plus `meeting-action` and `zoho-ai-generated` | Extend | Dry-run names all four; live pilot confirms IDs/readback |
 | Task list | Creates `Meeting Actions – [date]`, then tasks; may fall back to General | Task-list policy is not specified by v2 requirements | Decision needed | Decide before payload implementation; absence must not weaken task traceability |
 | Description | Basic source date/action/owner or LLM worksheet HTML | Full source, meeting, owner resolution, due text, original text, hashes, and diagnostic review fields | Extend | Snapshot test covers all required fields |
 | Source traceability | Meeting date and original action; no stable WorkDrive file ID/action hash | Include source file ID/name/path, source hash, action hash, meeting name/date | Extend | Reviewer can trace every candidate back to one source bullet |
@@ -53,11 +53,10 @@
 - [ ] Parser fixtures cover all approved headings, boundaries, bullet formats, and negative cases.
 - [ ] Unknown, missing, and multiple-owner behavior is explicit and non-inferential.
 - [ ] Raw due-date text is retained and no relative date is calculated.
-- [ ] Task payloads include `Needs Review`, all five tags, and complete source traceability.
+- [ ] Task payloads include `In Progress`, all four tags, and complete source traceability.
 - [ ] File and action hashes are deterministic across retries.
 - [ ] Partial-failure and zero-action behavior is retry-safe.
 - [ ] Exact Zoho status/tag mappings and unassigned-task support are verified under authorization.
 - [ ] No secret, OAuth token, API key, or personal local path exists in new implementation/configuration.
 - [ ] No Claude/OpenAI/external LLM dependency exists.
 - [ ] The original v1 directory and working pipeline remain unchanged.
-

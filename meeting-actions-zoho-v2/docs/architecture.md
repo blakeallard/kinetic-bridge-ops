@@ -10,7 +10,7 @@ The architecture is constrained by these rules:
 - Parsing is deterministic and restricted to explicit action-item sections.
 - No Claude, OpenAI, or other external LLM participates.
 - Missing owners and dates are not inferred.
-- Every task starts in `Needs Review` and retains its source evidence.
+- Every task starts in `In Progress` and retains its source evidence.
 - Processing is idempotent at both file and action level.
 - Dry-run is the default and performs no external writes.
 - v2 operates alongside v1 and has no control over v1 files or services.
@@ -40,7 +40,7 @@ Dry-run result / audit log -------------------------+
    | explicit future live-mode gate                 |
    v                                                v
 Zoho Projects                              Processed-file registry
-Needs Review tasks                         (Creator preferred; Sheet acceptable)
+In Progress tasks                         (Creator preferred; Sheet acceptable)
 ```
 
 Zoho Flow is preferred because it makes trigger, content-fetch, error handling, and orchestration steps visible in one place. An acceptable alternate is a WorkDrive workflow rule invoking a WorkDrive custom function. Both paths must use the same parser contract, payload contract, safety gate, and idempotency rules.
@@ -97,7 +97,7 @@ An unknown or absent owner remains unresolved. The live integration should creat
 
 Due-date text is preserved verbatim. The initial version does not turn `Friday`, `next week`, or any other relative expression into a Zoho due date. An explicit ISO/calendar date may also remain descriptive until date handling is separately designed and approved.
 
-Meeting name and meeting date should come from authoritative event/file metadata. A documented filename rule may be used when metadata is absent, but failure to determine a date must produce `unknown`/`Needs Review`, never a fabricated year.
+Meeting name and meeting date should come from authoritative event/file metadata. A documented filename rule may be used when metadata is absent, but failure to determine a date must produce `unknown`, never a fabricated year.
 
 ### 4. Candidate task payload
 
@@ -106,23 +106,23 @@ The normalized internal candidate should include at least:
 | Field | Rule |
 | --- | --- |
 | `task_name` | `[Meeting] - [Action Text]`, constrained safely to Zoho's verified limit |
-| `status` | `Needs Review` |
+| `status` | `In Progress` |
 | `owner_raw` | Exact detected text or empty |
 | `owner_id` | Mapped ID, null/unassigned, or explicit configured fallback |
 | `owner_resolution` | `matched`, `unassigned`, or `fallback` |
 | `due_date_raw` | Exact detected text or empty |
 | `due_date` | Unset in the initial version |
-| `tags` | `automation`, `internal-work`, `meeting-action`, `zoho-ai-generated`, `needs-review` |
+| `tags` | `automation`, `internal-work`, `meeting-action`, `zoho-ai-generated` |
 | `source_file_id` | Stable WorkDrive file ID |
 | `source_file_name` | Display and audit value |
 | `source_hash` | Hash of normalized source content |
 | `action_hash` | Deterministic hash of source identity plus normalized explicit action |
 | `original_action_text` | Unmodified source bullet text |
-| `diagnostic_status` | `Needs Review` for all workflow-diagnostic fields |
+| `diagnostic_placeholder` | `Not provided` for all workflow-diagnostic fields |
 
-The description must render the source type (`Zoho AI meeting summary`), summary file identity, meeting name/date, owner detection/resolution, raw due text, original action text, file/action hashes, and Workflow Diagnostic fields. The diagnostic fields carried forward from v1 are requested task, business problem, how the workflow should work, success criteria, current status, problem type, systems involved, data needed, access/approval needed, information moving between systems, one-sentence diagnosis, and next action. The initial no-LLM version does not invent answers for these fields; each remains visibly `Needs Review` for a human.
+The description must render the source type (`Zoho AI meeting summary`), summary file identity, meeting name/date, owner detection/resolution, raw due text, original action text, file/action hashes, and Workflow Diagnostic fields. The diagnostic fields carried forward from v1 are requested task, business problem, how the workflow should work, success criteria, current status, problem type, systems involved, data needed, access/approval needed, information moving between systems, one-sentence diagnosis, and next action. The initial no-LLM version does not invent answers for these fields; each remains visibly `Not provided` for a human.
 
-Portal `898600220`, project `2543412000001324010`, the known owner IDs, and known tag IDs are configuration values. They are not secrets, but should not be scattered through implementation code. IDs for the three new required tags and the exact `Needs Review` status value must be discovered and validated before live mode.
+Portal `898600220`, project `2543412000001324010`, the known owner IDs, and known tag IDs are configuration values. They are not secrets, but should not be scattered through implementation code. IDs for the two new required tags and the exact `In Progress` status value must be discovered and validated before live mode.
 
 ### 5. Idempotency and registry
 

@@ -277,7 +277,7 @@ def build_processing_report(
             {
                 "type": "configuration",
                 "code": "missing_status_id",
-                "details": "Needs Review status ID has not been verified",
+                "details": "In Progress status ID has not been verified",
             }
         )
     if "missing_tag_ids" in configuration_blocker_codes:
