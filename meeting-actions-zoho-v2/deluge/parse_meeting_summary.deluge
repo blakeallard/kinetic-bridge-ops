@@ -67,11 +67,58 @@ map parse_meeting_summary(map flow_input)
 		escaped_newline_length = file_text.length() - file_text.replaceAll("\\n", "", true).length();
 		escaped_newline_sequence_count = escaped_newline_length / 2;
 		bullet_candidate_count = 0;
+		symbol_bullet_candidate_count = 0;
+		numbered_candidate_count = 0;
+		first_detected_bullet_line = "";
 		for each diagnostic_line in lines
 		{
-			if(diagnostic_line.matches("^\\s*([-*•]|[0-9]+[.)])\\s+.+$"))
+			/*
+			 * Creator runtime did not recognize these bullets through matches().
+			 * Classify the trimmed prefix with deterministic string operations.
+			 */
+			diagnostic_trimmed = diagnostic_line.trim();
+			diagnostic_symbol_bullet = diagnostic_trimmed.startsWith("- ") || diagnostic_trimmed.startsWith("* ") || diagnostic_trimmed.startsWith("• ");
+			diagnostic_numbered_bullet = false;
+			diagnostic_dot_separator = diagnostic_trimmed.indexOf(". ");
+			diagnostic_paren_separator = diagnostic_trimmed.indexOf(") ");
+			diagnostic_separator = -1;
+			if(diagnostic_dot_separator > 0 && (diagnostic_paren_separator < 0 || diagnostic_dot_separator < diagnostic_paren_separator))
+			{
+				diagnostic_separator = diagnostic_dot_separator;
+			}
+			else if(diagnostic_paren_separator > 0)
+			{
+				diagnostic_separator = diagnostic_paren_separator;
+			}
+			if(!diagnostic_symbol_bullet && diagnostic_separator > 0)
+			{
+				diagnostic_number_prefix = diagnostic_trimmed.subString(0,diagnostic_separator);
+				diagnostic_numbered_bullet = diagnostic_number_prefix.isNumber() && !diagnostic_number_prefix.contains(".") && !diagnostic_number_prefix.contains("-") && !diagnostic_number_prefix.contains("+") && !diagnostic_number_prefix.contains(",") && !diagnostic_number_prefix.contains(" ");
+			}
+			if(diagnostic_symbol_bullet)
+			{
+				diagnostic_body_start = 2;
+			}
+			else
+			{
+				diagnostic_body_start = diagnostic_separator + 2;
+			}
+			diagnostic_is_bullet = diagnostic_symbol_bullet || diagnostic_numbered_bullet;
+			if(diagnostic_is_bullet && diagnostic_trimmed.length() > diagnostic_body_start)
 			{
 				bullet_candidate_count = bullet_candidate_count + 1;
+				if(diagnostic_symbol_bullet)
+				{
+					symbol_bullet_candidate_count = symbol_bullet_candidate_count + 1;
+				}
+				else
+				{
+					numbered_candidate_count = numbered_candidate_count + 1;
+				}
+				if(first_detected_bullet_line == "")
+				{
+					first_detected_bullet_line = diagnostic_trimmed;
+				}
 			}
 		}
 		result.put("diagnostic_mode", true);
@@ -84,6 +131,9 @@ map parse_meeting_summary(map flow_input)
 		result.put("escaped_newline_sequence_count", escaped_newline_sequence_count);
 		result.put("first_200_chars", first_200_chars);
 		result.put("bullet_candidate_count", bullet_candidate_count);
+		result.put("symbol_bullet_candidate_count", symbol_bullet_candidate_count);
+		result.put("numbered_candidate_count", numbered_candidate_count);
+		result.put("first_detected_bullet_line", first_detected_bullet_line);
 	}
 
 	if(file_name == "")
@@ -169,7 +219,34 @@ map parse_meeting_summary(map flow_input)
 			continue;
 		}
 
-		is_bullet = line.matches("^\\s*([-*•]|[0-9]+[.)])\\s+.+$");
+		/* Non-regex top-level bullet classification; keep aligned with diagnostics. */
+		is_symbol_bullet = trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ");
+		is_numbered_bullet = false;
+		bullet_dot_separator = trimmed.indexOf(". ");
+		bullet_paren_separator = trimmed.indexOf(") ");
+		bullet_separator = -1;
+		if(bullet_dot_separator > 0 && (bullet_paren_separator < 0 || bullet_dot_separator < bullet_paren_separator))
+		{
+			bullet_separator = bullet_dot_separator;
+		}
+		else if(bullet_paren_separator > 0)
+		{
+			bullet_separator = bullet_paren_separator;
+		}
+		if(!is_symbol_bullet && bullet_separator > 0)
+		{
+			bullet_number_prefix = trimmed.subString(0,bullet_separator);
+			is_numbered_bullet = bullet_number_prefix.isNumber() && !bullet_number_prefix.contains(".") && !bullet_number_prefix.contains("-") && !bullet_number_prefix.contains("+") && !bullet_number_prefix.contains(",") && !bullet_number_prefix.contains(" ");
+		}
+		if(is_symbol_bullet)
+		{
+			bullet_body_start = 2;
+		}
+		else
+		{
+			bullet_body_start = bullet_separator + 2;
+		}
+		is_bullet = (is_symbol_bullet || is_numbered_bullet) && trimmed.length() > bullet_body_start;
 		is_markdown_heading = trimmed.matches("^#{1,6}\\s+.+$");
 		is_known_major = known_major_headings.contains(heading_candidate);
 		is_plain_generic_heading = false;
@@ -206,7 +283,7 @@ map parse_meeting_summary(map flow_input)
 		if(is_bullet)
 		{
 			indent = line.length() - line.ltrim().length();
-			body = line.replaceFirst("^\\s*([-*•]|[0-9]+[.)])\\s+", "").trim();
+			body = trimmed.subString(bullet_body_start,trimmed.length()).trim();
 			body_lower = body.toLowerCase();
 			is_metadata = body_lower.matches("^(owner|owners|assignee|assignees|due|due date)\\s*:.*$");
 
@@ -303,7 +380,34 @@ map parse_meeting_summary(map flow_input)
 			continue;
 		}
 
-		is_bullet = line.matches("^\\s*([-*•]|[0-9]+[.)])\\s+.+$");
+		/* Non-regex top-level bullet classification; keep aligned with diagnostics. */
+		is_symbol_bullet = trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ");
+		is_numbered_bullet = false;
+		bullet_dot_separator = trimmed.indexOf(". ");
+		bullet_paren_separator = trimmed.indexOf(") ");
+		bullet_separator = -1;
+		if(bullet_dot_separator > 0 && (bullet_paren_separator < 0 || bullet_dot_separator < bullet_paren_separator))
+		{
+			bullet_separator = bullet_dot_separator;
+		}
+		else if(bullet_paren_separator > 0)
+		{
+			bullet_separator = bullet_paren_separator;
+		}
+		if(!is_symbol_bullet && bullet_separator > 0)
+		{
+			bullet_number_prefix = trimmed.subString(0,bullet_separator);
+			is_numbered_bullet = bullet_number_prefix.isNumber() && !bullet_number_prefix.contains(".") && !bullet_number_prefix.contains("-") && !bullet_number_prefix.contains("+") && !bullet_number_prefix.contains(",") && !bullet_number_prefix.contains(" ");
+		}
+		if(is_symbol_bullet)
+		{
+			bullet_body_start = 2;
+		}
+		else
+		{
+			bullet_body_start = bullet_separator + 2;
+		}
+		is_bullet = (is_symbol_bullet || is_numbered_bullet) && trimmed.length() > bullet_body_start;
 		is_markdown_heading = trimmed.matches("^#{1,6}\\s+.+$");
 		is_known_major = known_major_headings.contains(heading_candidate);
 		is_plain_generic_heading = false;
@@ -322,7 +426,7 @@ map parse_meeting_summary(map flow_input)
 		}
 
 		original_source_text = trimmed;
-		body = line.replaceFirst("^\\s*([-*•]|[0-9]+[.)])\\s+", "").trim();
+		body = trimmed.subString(bullet_body_start,trimmed.length()).trim();
 		body_lower = body.toLowerCase();
 		embedded_due_value = "";
 		due_label_index = body_lower.indexOf("due:");

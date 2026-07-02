@@ -95,11 +95,53 @@ class DelugeStage8ContractTests(unittest.TestCase):
             "escaped_newline_sequence_count": file_text.count("\\n"),
             "first_200_chars": file_text[:200],
             "bullet_candidate_count": sum(
-                bool(re.fullmatch(r"\s*([-*•]|[0-9]+[.)])\s+.+", line))
+                self._deterministic_bullet_kind(line) is not None
                 for line in normalized.split("\n")
+            ),
+            "symbol_bullet_candidate_count": sum(
+                self._deterministic_bullet_kind(line) == "symbol"
+                for line in normalized.split("\n")
+            ),
+            "numbered_candidate_count": sum(
+                self._deterministic_bullet_kind(line) == "numbered"
+                for line in normalized.split("\n")
+            ),
+            "first_detected_bullet_line": next(
+                line.strip()
+                for line in normalized.split("\n")
+                if self._deterministic_bullet_kind(line) is not None
             ),
         }
         self.assertEqual(actual, expected)
+
+    @staticmethod
+    def _deterministic_bullet_kind(line: str) -> str | None:
+        trimmed = line.strip()
+        if any(trimmed.startswith(prefix) for prefix in ("- ", "* ", "• ")):
+            return "symbol" if len(trimmed) > 2 else None
+        for separator in (". ", ") "):
+            prefix, found, body = trimmed.partition(separator)
+            if found and prefix.isdigit() and body:
+                return "numbered"
+        return None
+
+    def test_deterministic_bullet_formats_and_rejections(self) -> None:
+        expected = {
+            "- action": "symbol",
+            "* action": "symbol",
+            "• action": "symbol",
+            "1. action": "numbered",
+            "25) action": "numbered",
+            "   - indented action": "symbol",
+            "   3) indented action": "numbered",
+            "not a bullet": None,
+            "1.action": None,
+            "-": None,
+            "1. ": None,
+        }
+        for line, kind in expected.items():
+            with self.subTest(line=line):
+                self.assertEqual(self._deterministic_bullet_kind(line), kind)
 
     def test_deluge_source_exposes_stage8_contract_and_no_live_operations(self) -> None:
         source = DELUGE_PATH.read_text(encoding="utf-8")
@@ -126,6 +168,15 @@ class DelugeStage8ContractTests(unittest.TestCase):
             'result.put("line_count", lines.size())',
             'result.put("first_200_chars", first_200_chars)',
             'result.put("bullet_candidate_count", bullet_candidate_count)',
+            'result.put("symbol_bullet_candidate_count", symbol_bullet_candidate_count)',
+            'result.put("numbered_candidate_count", numbered_candidate_count)',
+            'result.put("first_detected_bullet_line", first_detected_bullet_line)',
+            'trimmed.startsWith("- ")',
+            'trimmed.startsWith("* ")',
+            'trimmed.startsWith("• ")',
+            'diagnostic_trimmed.startsWith("- ")',
+            "bullet_number_prefix.isNumber()",
+            "diagnostic_number_prefix.isNumber()",
         )
         for fragment in required_fragments:
             with self.subTest(fragment=fragment):
@@ -137,6 +188,10 @@ class DelugeStage8ContractTests(unittest.TestCase):
                 self.assertNotIn(forbidden, executable_source)
         self.assertNotIn(
             'normalized_file_text = normalized_file_text.replaceAll("\\\\n", "\\n"',
+            source,
+        )
+        self.assertNotIn(
+            'matches("^\\\\s*([-*•]|[0-9]+[.)])\\\\s+.+$")',
             source,
         )
         self.assertEqual(source.count("{"), source.count("}"))

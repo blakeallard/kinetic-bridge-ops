@@ -4,7 +4,9 @@
 
 **FAIL — the function compiled and executed, but returned zero actions instead of the expected parser/QC projection.**
 
-This document records the supplied runtime evidence. It does not claim the failure source is fixed.
+This document records the supplied runtime evidence and the subsequent Stage 9E
+classification fix. Runtime parity remains pending until the fixed function is
+executed again in Creator.
 
 ## Runtime Context
 
@@ -58,14 +60,56 @@ No Projects task creation, Flow/WorkDrive wiring, registry persistence, or exter
 
 ## Current Diagnosis
 
-The empty `errors` list proves `flow_input.get("file_text")` returned a non-null value. It does **not** prove that value was non-empty, contained the expected 1,287 characters, or contained actual newline characters.
+### Diagnostic retry result
 
-The zero raw-action result is consistent with multiple unresolved causes:
+The subsequent Creator diagnostic retry confirmed that `file_text` was present,
+non-empty, normalized, and split into the expected lines. Creator nevertheless
+returned:
+
+```json
+{
+  "bullet_candidate_count": 0,
+  "raw_action_count": 0,
+  "selected_action_count": 0,
+  "skipped_candidate_count": 0,
+  "item_count": 0,
+  "errors": []
+}
+```
+
+The expected bullet count for the same input is `13`. This isolates the first
+failure to Creator's runtime evaluation of the Deluge bullet `matches(...)`
+expression; it is not an input-map, text-presence, newline-normalization, or
+line-splitting failure.
+
+Stage 9E replaces that expression at all three bullet-classification sites with
+deterministic trimmed-string checks for `- `, `* `, `• `, `[digits]. `, and
+`[digits]) `. Bullet prefix removal uses the same calculated string offset, so
+it no longer depends on the equivalent regex. QC selection logic is unchanged.
+
+The diagnostic return now also includes:
+
+- `symbol_bullet_candidate_count` (expected `10`)
+- `numbered_candidate_count` (expected `3`)
+- `first_detected_bullet_line` (expected `1. The team reviewed an internal workflow and its current implementation.`)
+
+### Superseded pre-diagnostic hypotheses
+
+Before the diagnostic retry, the empty `errors` list proved only that
+`flow_input.get("file_text")` returned a non-null value. It did **not** prove
+that value was non-empty, contained the expected 1,287 characters, or contained
+actual newline characters.
+
+At that point, the zero raw-action result was consistent with several causes:
 
 1. Creator supplied `file_text` as an empty string.
 2. Creator supplied one string containing literal backslash-plus-`n` sequences instead of actual newlines, so `toList("\n")` produced one line.
 3. Line splitting succeeded, but Creator's regex behavior detected zero bullet candidates.
 4. Bullet detection succeeded, but a later embedded-action branch behaved differently in Creator.
+
+The diagnostic retry eliminated causes 1, 2, and 4 at the first failing
+boundary and confirmed cause 3. These hypotheses are retained only as the
+investigation record.
 
 Metadata fields being present does not distinguish these cases. Parser logic must not be changed until runtime diagnostics identify the first failing boundary.
 
@@ -97,6 +141,9 @@ For the correctly decoded sanitized fixture, expected diagnostics are recorded i
 | `actual_newline_count` | `18` |
 | `escaped_newline_sequence_count` | `0` |
 | `bullet_candidate_count` | `13` |
+| `symbol_bullet_candidate_count` | `10` |
+| `numbered_candidate_count` | `3` |
+| `first_detected_bullet_line` | `1. The team reviewed an internal workflow and its current implementation.` |
 
 ## Exact Next Retry
 
@@ -104,15 +151,16 @@ For the correctly decoded sanitized fixture, expected diagnostics are recorded i
 2. Use `samples/deluge/stage9_diagnostic_flow_input.json` as the input map. It is identical to the Stage 8 fixture plus boolean `diagnostic_mode: true`.
 3. Ensure `flow_input` is a Creator map/key-value argument. Its `file_text` value must be the fixture's multiline text value, not the entire JSON object serialized into one text field.
 4. Execute the function once and capture the complete returned map.
-5. Compare the nine diagnostic fields with `samples/deluge/stage9_expected_diagnostics.json` before evaluating parser counts.
-6. Follow the decision table below. Do not edit parser logic during this retry.
+5. Compare all diagnostic fields with `samples/deluge/stage9_expected_diagnostics.json` before evaluating parser counts.
+6. Confirm `bullet_candidate_count=13`, with `10` symbol and `3` numbered bullets, before comparing the expected parser/QC counts (`13` raw, `8` selected, `5` skipped, `8` items).
+7. Capture the complete returned map. Do not add the function to any event or workflow.
 
 | Runtime observation | Isolated conclusion | Next action |
 | --- | --- | --- |
 | `file_text_present=false` | Creator map key/binding is wrong | Correct the map argument/key only |
 | `file_text_non_empty=false` or length `0` | Creator passed an empty value | Correct the map value only |
 | `line_count=1`, actual newlines `0`, escaped sequences `>0` | Literal `\n` encoding confirmed | Add and test a deterministic escaped-newline normalization fix in a follow-up commit |
-| `line_count=19`, bullets `0` | Creator regex/bullet matching differs | Isolate the bullet expression in a minimal diagnostic; do not change action/QC logic |
+| `line_count=19`, bullets `0` | The Stage 9E string classifier still differs in Creator | Capture the three new bullet diagnostics; do not change QC logic |
 | `line_count=19`, bullets `13`, raw actions `0` | Failure occurs after line splitting/bullet recognition | Add branch counters for embedded phrase recognition in a follow-up diagnostic |
 | Diagnostics match and raw count `13` | Input boundary works in diagnostic revision | Compare QC counts/order and record remaining differences |
 
