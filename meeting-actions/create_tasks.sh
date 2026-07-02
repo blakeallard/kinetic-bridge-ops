@@ -118,19 +118,18 @@ emit_event "parse_action_items" "Parse Action Items" "running" \
 echo "[parse] Extracting action items from $BASENAME ..."
 
 # stdout → temp file; stderr (worksheet progress) → terminal as usual
-if [[ "$WORKSHEET" == "true" ]]; then
-  $PYTHON "$SCRIPT_DIR/parse_meeting_actions.py" "$NOTES_FILE" "--worksheet" > "$ITEMS_FILE" || {
-    emit_event "parse_action_items" "Parse Action Items" "failed" --error "parse_meeting_actions.py exited non-zero"
-    echo "[error] parse_meeting_actions.py failed." >&2
-    exit 1
-  }
-else
-  $PYTHON "$SCRIPT_DIR/parse_meeting_actions.py" "$NOTES_FILE" > "$ITEMS_FILE" || {
-    emit_event "parse_action_items" "Parse Action Items" "failed" --error "parse_meeting_actions.py exited non-zero"
-    echo "[error] parse_meeting_actions.py failed." >&2
-    exit 1
-  }
-fi
+# --blake-only is passed through here too, BEFORE the worksheet-fill step, so
+# Claude is never called to fill out worksheets for other people's action
+# items that get discarded later anyway.
+PARSE_ARGS=("$NOTES_FILE")
+[[ "$WORKSHEET" == "true" ]] && PARSE_ARGS+=("--worksheet")
+[[ "$BLAKE_ONLY" == "true" ]] && PARSE_ARGS+=("--blake-only")
+
+$PYTHON "$SCRIPT_DIR/parse_meeting_actions.py" "${PARSE_ARGS[@]}" > "$ITEMS_FILE" || {
+  emit_event "parse_action_items" "Parse Action Items" "failed" --error "parse_meeting_actions.py exited non-zero"
+  echo "[error] parse_meeting_actions.py failed." >&2
+  exit 1
+}
 
 ITEM_COUNT=$(python3 -c "import json; print(len(json.load(open('$ITEMS_FILE'))))" 2>/dev/null || echo "0")
 echo "[parse] Found $ITEM_COUNT action items."

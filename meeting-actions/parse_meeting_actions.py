@@ -227,7 +227,7 @@ def basic_description(item: dict) -> str:
 
 # ── File parsing ──────────────────────────────────────────────────────────────
 
-def parse_file(path: Path, use_worksheet: bool = False) -> list[dict]:
+def parse_file(path: Path, use_worksheet: bool = False, blake_only: bool = False) -> list[dict]:
     text = path.read_text(encoding="utf-8")
 
     # Derive meeting date from metadata.json or folder name
@@ -261,6 +261,10 @@ def parse_file(path: Path, use_worksheet: bool = False) -> list[dict]:
         items = parse_inline_format(section, meeting_date)
 
     for item in items:
+        owned_by_blake = item["owner_zpuid"] == OWNER_MAP["blake"]
+        if blake_only and not owned_by_blake:
+            item["description"] = basic_description(item)
+            continue
         if use_worksheet and not item["is_fallback"]:
             print(f"  [worksheet] Filling: {item['name'][:60]}...", file=sys.stderr)
             try:
@@ -281,10 +285,11 @@ def parse_file(path: Path, use_worksheet: bool = False) -> list[dict]:
 def main():
     args = sys.argv[1:]
     use_worksheet = "--worksheet" in args
+    blake_only = "--blake-only" in args
     files = [a for a in args if not a.startswith("--")]
 
     if not files:
-        print(f"Usage: {sys.argv[0]} <notes_file> [--worksheet]", file=sys.stderr)
+        print(f"Usage: {sys.argv[0]} <notes_file> [--worksheet] [--blake-only]", file=sys.stderr)
         sys.exit(1)
 
     path = Path(files[0])
@@ -294,7 +299,7 @@ def main():
         print(f"[error] File not found: {files[0]}", file=sys.stderr)
         sys.exit(1)
 
-    items = parse_file(path, use_worksheet=use_worksheet)
+    items = parse_file(path, use_worksheet=use_worksheet, blake_only=blake_only)
     print(json.dumps(items, indent=2))
 
 

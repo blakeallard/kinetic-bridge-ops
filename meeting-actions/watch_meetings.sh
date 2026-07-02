@@ -17,7 +17,11 @@ if [[ ! -f "$STATE_FILE" ]]; then
   echo '{"processed":[]}' > "$STATE_FILE"
 fi
 
-# Find unprocessed summary files
+# Find unprocessed summary files for meetings Blake hosts/is named in.
+# Matched on the summary file's own name (same identifier the rest of the
+# pipeline uses for meeting_date/task naming), not the parent folder — some
+# WorkDrive folders contain stray/duplicate summaries for other people's
+# meetings under a Blake-named folder, and those should still be skipped.
 NEW_FILES=$($PYTHON - <<PYEOF
 import json, os
 from pathlib import Path
@@ -28,8 +32,11 @@ processed = set(state.get("processed", []))
 
 new = []
 for f in sorted(workdrive.rglob("*_summary.txt")):
-    if f.name not in processed:
-        new.append(str(f))
+    if f.name in processed:
+        continue
+    if "blake" not in f.stem.lower():
+        continue
+    new.append(str(f))
 
 print("\n".join(new))
 PYEOF
