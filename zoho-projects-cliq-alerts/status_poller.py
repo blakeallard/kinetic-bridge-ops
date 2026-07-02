@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import json
+import time
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -77,6 +78,8 @@ ALERT_STATUSES = {
 }
 
 STATE_FILE = os.path.join(SCRIPT_DIR, "status_poller_state.json")
+TOKEN_CACHE_FILE = os.path.join(SCRIPT_DIR, "zoho_access_token_cache.json")
+TOKEN_EXPIRY_SKEW_SECONDS = 5 * 60
 
 # ── State helpers ─────────────────────────────────────────────────────────────
 def load_state():
@@ -90,7 +93,52 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 # ── Zoho OAuth ────────────────────────────────────────────────────────────────
-def get_access_token():
+def load_cached_access_token():
+    if not os.path.exists(TOKEN_CACHE_FILE):
+        return None
+    try:
+        with open(TOKEN_CACHE_FILE) as f:
+            cache = json.load(f)
+        token = cache.get("access_token")
+        expires_at = float(cache.get("expires_at", 0))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as e:
+        print(f"[WARN] Ignoring invalid Zoho token cache: {e}")
+        return None
+
+    if not token or time.time() >= expires_at - TOKEN_EXPIRY_SKEW_SECONDS:
+        return None
+
+    print("[INFO] Reusing cached Zoho access token")
+    return token
+
+
+def save_access_token_cache(token, expires_at):
+    cache = {
+        "access_token": token,
+        "expires_at": expires_at,
+    }
+    temp_path = f"{TOKEN_CACHE_FILE}.tmp"
+    try:
+        with open(temp_path, "w") as f:
+            json.dump(cache, f, indent=2)
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, TOKEN_CACHE_FILE)
+    except OSError as e:
+        print(f"[WARN] Could not write Zoho token cache: {e}")
+
+
+def _token_refresh_error_message(result):
+    if not isinstance(result, dict):
+        return "unexpected response"
+    return result.get("error_description") or result.get("error") or "access token missing from response"
+
+
+def get_access_token(force_refresh=False):
+    if not force_refresh:
+        cached_token = load_cached_access_token()
+        if cached_token:
+            return cached_token
+
     url = "https://accounts.zoho.com/oauth/v2/token"
     params = {
         "refresh_token": os.environ["ZOHO_REFRESH_TOKEN"],
@@ -104,28 +152,76 @@ def get_access_token():
         with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        print(f"[ERROR] Token refresh {e.code}: {e.read().decode()}")
+        body = e.read().decode(errors="replace")
+        try:
+            detail = _token_refresh_error_message(json.loads(body))
+        except json.JSONDecodeError:
+            detail = f"HTTP {e.code}"
+        print(f"[ERROR] Token refresh failed: HTTP {e.code}: {detail}")
+        sys.exit(1)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        print(f"[ERROR] Token refresh failed: {e}")
         sys.exit(1)
     if "access_token" not in result:
-        print(f"[ERROR] Token refresh failed: {result}")
+        print(f"[ERROR] Token refresh failed: {_token_refresh_error_message(result)}")
         sys.exit(1)
+
+    try:
+        expires_in = int(result.get("expires_in_sec", result.get("expires_in", 3600)))
+    except (TypeError, ValueError):
+        expires_in = 3600
+    expires_at = time.time() + expires_in
+    save_access_token_cache(result["access_token"], expires_at)
+    print("[INFO] Refreshed Zoho access token")
     return result["access_token"]
 
 # ── Zoho Projects API ─────────────────────────────────────────────────────────
+def _is_auth_error(status_code, body):
+    normalized = body.lower().replace("-", "_").replace(" ", "_")
+    return status_code == 401 or any(marker in normalized for marker in (
+        "invalid_token",
+        "invalid_oauthtoken",
+        "invalid_oauth_token",
+    ))
+
+
+def _authorized_get_json(url, token, error_context, warn_only=False):
+    current_token = token
+    for attempt in range(2):
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", f"Zoho-oauthtoken {current_token}")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                body = resp.read()
+                return (json.loads(body) if body.strip() else {}), current_token
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="replace")
+            if attempt == 0 and _is_auth_error(e.code, body):
+                print("[INFO] Cached Zoho access token was rejected; refreshing and retrying")
+                current_token = get_access_token(force_refresh=True)
+                continue
+            if warn_only:
+                print(f"[WARN] {error_context}: HTTP {e.code}")
+                return {}, current_token
+            print(f"[ERROR] {error_context}: HTTP {e.code}: {body}")
+            sys.exit(1)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+            if warn_only:
+                print(f"[WARN] {error_context}: {e}")
+                return {}, current_token
+            print(f"[ERROR] {error_context}: {e}")
+            sys.exit(1)
+
+    raise RuntimeError("unreachable")
+
+
 def get_tasks(portal_id, project_id, token):
     url = (
         f"https://projectsapi.zoho.com/restapi/portal/{portal_id}"
         f"/projects/{project_id}/tasks/"
     )
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", f"Zoho-oauthtoken {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            result = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        print(f"[ERROR] Get tasks {e.code}: {e.read().decode()}")
-        sys.exit(1)
-    return result.get("tasks", [])
+    result, token = _authorized_get_json(url, token, "Get tasks failed")
+    return result.get("tasks", []), token
 
 def _strip_html(text):
     text = re.sub(r"<[^>]+>", " ", text)
@@ -137,20 +233,17 @@ def get_latest_comment(portal_id, project_id, task_id, token):
         f"https://projectsapi.zoho.com/restapi/portal/{portal_id}"
         f"/projects/{project_id}/tasks/{task_id}/comments/"
     )
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", f"Zoho-oauthtoken {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = resp.read()
-            result = json.loads(body) if body.strip() else {}
-    except urllib.error.HTTPError as e:
-        print(f"[WARN] Could not fetch comments for {task_id}: {e.code}")
-        return ""
+    result, token = _authorized_get_json(
+        url,
+        token,
+        f"Could not fetch comments for {task_id}",
+        warn_only=True,
+    )
     comments = result.get("comments", [])
     if not comments:
-        return ""
+        return "", token
     latest = max(comments, key=lambda c: c.get("created_time_long", 0))
-    return _strip_html(latest.get("content", ""))
+    return _strip_html(latest.get("content", "")), token
 
 # ── Cliq notification ─────────────────────────────────────────────────────────
 def post_cliq_message(webhook_url, task_name, task_key, status_name, comment, task_url):
@@ -220,7 +313,7 @@ def main():
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Polling tasks...")
     token = get_access_token()
-    tasks = get_tasks(portal_id, project_id, token)
+    tasks, token = get_tasks(portal_id, project_id, token)
 
     new_state = {}
     for task in tasks:
@@ -241,7 +334,7 @@ def main():
 
         print(f"[!] {task_key} moved to '{status_name}' (was '{prev_status}')")
 
-        comment  = get_latest_comment(portal_id, project_id, task_id, token)
+        comment, token = get_latest_comment(portal_id, project_id, task_id, token)
         task_url = build_task_url(project_id, task_id)
         webhook_url = os.environ[ALERT_STATUSES[status_lower]]
 
