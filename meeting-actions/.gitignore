@@ -11,6 +11,7 @@
 # Runtime state (processed-file registry — contains private meeting names)
 processed_notes.json
 processed_notes.json.bak
+blake_task_board.json
 
 # Logs and temp files
 *.log
