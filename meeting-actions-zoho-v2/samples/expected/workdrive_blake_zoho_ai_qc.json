@@ -1,0 +1,40 @@
+{
+  "raw_action_count": 13,
+  "selected_action_texts": [
+    "Test field population accuracy",
+    "Refine the part number lookup functionality",
+    "Implement automated pricing imports",
+    "Conduct routing tests",
+    "Evaluate transcription accuracy",
+    "Mass import from the sanitized pricing matrix to populate the full item master",
+    "Fix duplicate routing before launch",
+    "Confirm launch readiness with stakeholders"
+  ],
+  "skipped_candidate_reviews": [
+    {
+      "action_text": "Implement automated updates",
+      "reason": "overlap_superseded_by_specific_candidate",
+      "selected_action_text": "Implement automated pricing imports"
+    },
+    {
+      "action_text": "Validate field accuracy",
+      "reason": "overlap_superseded_by_specific_candidate",
+      "selected_action_text": "Test field population accuracy"
+    },
+    {
+      "action_text": "Refine routing logic",
+      "reason": "overlap_superseded_by_specific_candidate",
+      "selected_action_text": "Fix duplicate routing before launch"
+    },
+    {
+      "action_text": "Validate imported descriptions",
+      "reason": "overlap_superseded_by_specific_candidate",
+      "selected_action_text": "Test field population accuracy"
+    },
+    {
+      "action_text": "Validate imported descriptions for data corruption",
+      "reason": "overlap_superseded_by_specific_candidate",
+      "selected_action_text": "Test field population accuracy"
+    }
+  ]
+}

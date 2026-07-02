@@ -18,6 +18,7 @@ import build_projects_payloads as payload_builder
 import build_registry_report as registry
 import create_tasks_guarded as create_guard
 import parse_summary as parser
+import review_action_candidates as candidate_review
 
 
 EMPTY_REGISTRY: Mapping[str, Any] = {"schema_version": 1, "files": []}
@@ -31,7 +32,7 @@ def run_workdrive_dry_run(
     meeting_name: str,
     registry_data: Mapping[str, Any] = EMPTY_REGISTRY,
 ) -> dict[str, Any]:
-    """Run parser -> payload builder -> registry -> create guard locally."""
+    """Run parser -> QC review -> payload builder -> registry -> guard locally."""
 
     if not isinstance(source_file_id, str) or not source_file_id.strip():
         raise ValueError("source_file_id must be non-empty text")
@@ -44,16 +45,20 @@ def run_workdrive_dry_run(
             "rejected non-target WorkDrive file: file name or folder path must contain Blake"
         )
 
-    actions = parser.parse_summary(input_path)
-    for action in actions:
+    raw_actions = parser.parse_summary(input_path)
+    for action in raw_actions:
         action["source_file_id"] = source_file_id.strip()
+        action["source_folder_path"] = source_folder_path.strip()
+
+    review = candidate_review.review_action_candidates(raw_actions)
+    selected_actions = review["parsed_actions_selected"]
 
     payloads = payload_builder.build_task_payloads(
-        actions,
+        selected_actions,
         meeting_name=meeting_name.strip(),
     )
     report = registry.build_processing_report(
-        actions,
+        selected_actions,
         payloads,
         registry_data,
         received_files=[
@@ -87,7 +92,9 @@ def run_workdrive_dry_run(
                 for name, tag_id in payload_builder.KNOWN_TAG_IDS.items()
             ],
         },
-        "parsed_actions": actions,
+        "parsed_actions_raw": review["parsed_actions_raw"],
+        "skipped_candidate_reviews": review["skipped_candidate_reviews"],
+        "parsed_actions_selected": selected_actions,
         "registry_report": report,
         "create_guard_result": guard_result,
         "network_task_creation_calls": 0,

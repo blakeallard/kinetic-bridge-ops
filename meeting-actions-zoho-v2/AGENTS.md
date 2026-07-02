@@ -31,7 +31,7 @@ The current phase includes the local parser, Deluge parser draft, payload builde
 ## Behavioral Rules
 
 - Use the Zoho AI/Zia summary as the source document.
-- Extract only explicit action items from approved section headings.
+- Extract explicit action items from approved sections and conservative future-work phrases embedded in Zoho AI summary bullets; never promote pure status/history prose.
 - Do not infer an owner or due date from surrounding prose.
 - Preserve unknown owners as unresolved. Prefer an unassigned task; if Zoho requires an owner, use the documented Blake fallback and label the fallback in the description.
 - Preserve relative or otherwise unparsed due-date text in the description; do not calculate it during the initial validation version.

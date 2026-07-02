@@ -7,7 +7,7 @@ The system tests whether deterministic parsing of Zoho AI/Zia summaries is suffi
 The architecture is constrained by these rules:
 
 - Zoho AI/Zia summary text is the only semantic source.
-- Parsing is deterministic and restricted to explicit action-item sections.
+- Parsing is deterministic: strict action-item sections plus conservative embedded future-work rules for real Zoho AI summary bullets.
 - No Claude, OpenAI, or other external LLM participates.
 - Missing owners and dates are not inferred.
 - Every task starts in `In Progress` and retains its source evidence.
@@ -32,6 +32,7 @@ Zoho Flow
         v
 Custom Deluge function
    | parse and normalize
+   | review/group candidate quality
    | resolve owner/configuration
    | construct candidate + hashes
    v
@@ -61,7 +62,7 @@ File names are display data, not the sole deduplication key. A rename must not c
 
 ### 2. Normalization and parsing
 
-Normalize line endings and insignificant whitespace without rewriting the original evidence. Search case-insensitively for these section headings only:
+Normalize line endings and insignificant whitespace without rewriting the original evidence. The strict pass searches case-insensitively for these section headings:
 
 - `Action Items`
 - `Action Item`
@@ -81,7 +82,11 @@ Supported initial bullet shapes are:
 - Review Zoho-only task pipeline — Bill
 ```
 
-The parser emits only an explicit top-level bullet. It must not turn narrative sentences, decisions, headings, owner lines, due lines, or other metadata into tasks. Unrecognized or ambiguous text is retained in diagnostics and skipped rather than guessed.
+The parser also performs a conservative embedded-action pass over summary bullets outside strict sections. It recognizes explicit future-work constructions such as `next steps include`, `plans to`, `is planned to`, labeled validation needs, and a fixed allowlist of action verbs. It splits only clearly delimited action lists, preserves the full original bullet, and rejects past-tense status/history prose. Blake ownership is allowed only when Blake is explicit in the action sentence; folder and meeting context never assign an owner. Unrecognized or ambiguous text is skipped rather than guessed.
+
+### 2a. Candidate quality review
+
+Before payload generation, a deterministic QC pass groups overlapping candidates within the same source summary. Fixed normalization, intent groups, and specificity weights choose one representative without inventing new work. Raw candidates remain in diagnostics; every exclusion records its reason and selected replacement. Only selected candidates continue to payload generation. The final Deluge implementation must reproduce the Python QC fixture without an external LLM.
 
 ### 3. Metadata resolution
 

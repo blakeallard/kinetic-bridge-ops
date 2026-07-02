@@ -4,7 +4,7 @@
 
 [`deluge/parse_meeting_summary.deluge`](../deluge/parse_meeting_summary.deluge) is a dry-run parser draft for a future Zoho Flow or WorkDrive custom function. It accepts already-fetched text and returns candidate action-item data. It contains no file fetch, `invokeurl`, OAuth, Zoho Projects task creation, registry mutation, or other live integration code.
 
-The Python parser in [`scripts/parse_summary.py`](../scripts/parse_summary.py) remains the source of truth. The checked-in files under `samples/` and `samples/expected/` define the validated behavior. Deluge output should not be treated as equivalent until the draft is pasted into the selected Zoho product's sandbox/editor and its output is compared with every Python fixture.
+The Python parser in [`scripts/parse_summary.py`](../scripts/parse_summary.py) and QC review in [`scripts/review_action_candidates.py`](../scripts/review_action_candidates.py) are the local source of truth. The checked-in files under `samples/` and `samples/expected/` define the validated behavior. The current Deluge draft covers the strict section pass only and must not be treated as Stage 7B-equivalent until the embedded Zoho AI rules and QC grouping are ported and compared with every Python fixture.
 
 ## Expected Input
 
@@ -113,4 +113,3 @@ Do not add a WorkDrive fetch, registry write, or Projects task action during thi
 - [Map `put` function](https://www.zoho.com/deluge/help/functions/map/put.html)
 - [List `add` function](https://www.zoho.com/deluge/help/functions/list/add.html)
 - [Deluge text functions](https://www.zoho.com/deluge/help/functions/text.html)
-

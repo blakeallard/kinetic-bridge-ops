@@ -2,10 +2,17 @@
 
 1. The team reviewed an internal workflow and its current implementation.
 2. Several data-quality and automation concerns were discussed.
-3. Key next steps include testing field population accuracy, implementing automated updates, and refining lookup functionality.
+3. Key next steps include testing field population accuracy, implementing automated updates, and refining the part number lookup functionality.
 
 - The current process still requires manual validation in several places.
-- Key next steps: validate field accuracy, implement automated imports, and refine routing logic.
+- Key next steps: validate field accuracy, implement automated pricing imports, and refine routing logic.
+- Blake plans to conduct routing tests and evaluate transcription accuracy.
+- A mass import from the sanitized pricing matrix is planned to populate the full item master.
+- Imported descriptions need validation before release.
+- Data corruption remains in imported descriptions, requiring validation.
+- Fix duplicate routing before launch.
+- Confirm launch readiness with stakeholders — Due: Friday.
+- The team implemented an earlier prototype last quarter.
 - Another next-steps sentence appears in ordinary prose rather than under an approved action heading.
 
 [The downloaded WorkDrive source contained no standalone Action Items, Action Item, Next Actions, or Next Steps heading.]

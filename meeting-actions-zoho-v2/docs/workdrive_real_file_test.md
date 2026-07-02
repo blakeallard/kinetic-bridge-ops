@@ -59,7 +59,7 @@ The Stage 7 read returned:
 
 No WorkDrive write tool was called. The retained fixture is a sanitized structural derivative, not a verbatim archive of the meeting summary.
 
-## Source Validation Result
+## Parser Format Fix
 
 The downloaded file contained no standalone approved action heading:
 
@@ -68,12 +68,59 @@ The downloaded file contained no standalone approved action heading:
 - `Next Actions`
 - `Next Steps`
 
-It did contain phrases such as “key next steps” inside numbered prose and bullets. The parser correctly rejected those phrases because v2 extracts actions only from an explicit approved section. Therefore this real source produces zero parsed actions and zero task payload candidates. This is a source-format validation result, not a parser failure.
+The original strict parser accepted only those headings, so its first real-file run safely returned zero actions. That behavior remains intact for clean action sections, but it was insufficient for real Zoho AI output because Zoho commonly embeds future work inside ordinary summary bullets.
 
-The sanitized fixture preserves that boundary behavior:
+The deterministic parser now performs a second, conservative Zoho AI embedded-action pass over bullets outside strict action sections. It recognizes explicit future-work forms such as:
+
+- `next steps include` and `next steps:`;
+- `plans to` and `is planned to`;
+- `requires validation`, `requiring validation`, and `needs validation`;
+- direct or listed actions beginning with `implement`, `refine`, `test`, `validate`, `fix`, `evaluate`, `confirm`, `conduct`, or `mass import`.
+
+Compound next-step lists are split into individual imperative candidates. Past-tense status/history statements remain excluded unless they contain an explicit future-work construction. Every embedded candidate retains its original source bullet in `original_source_text` and is labeled `extraction_mode: embedded_zoho_ai`.
+
+Blake is assigned only when `Blake` or `Blake Allard` appears in that candidate's source sentence. A Blake folder name or meeting context never assigns ownership. Other candidates remain unassigned. Due text remains unset unless the same bullet has explicit labeled due metadata, such as `Due: Friday`; the parser preserves that text without calculating a date.
+
+The sanitized fixture preserves representative structures from the real summary and includes rejected history/status bullets:
 
 ```text
 samples/real_inputs/Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt
+```
+
+Its deterministic expected candidates are checked in at `samples/expected/workdrive_blake_zoho_ai_summary.json`.
+
+## Stage 7B Deterministic QC Review
+
+Raw extraction is intentionally diagnostic and can contain overlapping wording from repeated Zoho AI summary sections. Before payload generation, `scripts/review_action_candidates.py` groups candidates only within the same source file and selects the most specific candidate in each deterministic intent group.
+
+The QC stage uses normalized tokens, a fixed intent taxonomy, and explicit specificity weights. It does not call an LLM or infer new work. Retained candidates preserve the parser's source file metadata, original source bullet, owner decision, due text, and action hash. Skipped candidates remain visible with:
+
+- the skipped action and source evidence;
+- `reason` (`repeated_summary_candidate` or `overlap_superseded_by_specific_candidate`);
+- the QC group; and
+- the selected replacement action/hash.
+
+For the sanitized real-format fixture, QC reduces 13 raw actions to these eight selected candidates:
+
+1. `Test field population accuracy`
+2. `Refine the part number lookup functionality`
+3. `Implement automated pricing imports`
+4. `Conduct routing tests`
+5. `Evaluate transcription accuracy`
+6. `Mass import from the sanitized pricing matrix to populate the full item master`
+7. `Fix duplicate routing before launch`
+8. `Confirm launch readiness with stakeholders`
+
+The five overlapping candidates are retained in `skipped_candidate_reviews` with their selected replacements. The expected QC decision is checked in at `samples/expected/workdrive_blake_zoho_ai_qc.json`.
+
+The runner's relevant output contract is:
+
+```text
+parsed_actions_raw           all deterministic parser results
+skipped_candidate_reviews    reasoned QC exclusions
+parsed_actions_selected      manager-usable retained candidates
+registry_report.payloads_that_would_be_created
+                             payloads for selected candidates only
 ```
 
 ## End-to-End Local Command
@@ -94,27 +141,33 @@ The command has no `--live` option. It invokes the existing create-task guard wi
 
 ```text
 received files:                 1
-parsed actions:                 0
+raw parsed actions:            13
+QC selected actions:            8
+QC skipped reviews:             5
 skipped duplicates:             0
-payloads that would be created: 0
-unresolved blockers:            0
+payloads that would be created: 8
+unresolved owner reviews:        6
 task-creation client calls:      0
 registry persisted:              false
 ```
 
-`payloads_that_would_be_created` is an empty list. No tasks would be created from this source because it lacks an approved action section.
+`payloads_that_would_be_created` contains only the eight QC-selected candidates. Two actions are assigned to Blake because he is explicit in their shared source sentence. The other six remain unassigned and appear as owner-review diagnostics. No candidate is assigned from folder or meeting context.
 
-The dry-run output also records the downstream target configuration that would apply if explicit actions were present:
+Every generated payload uses the verified downstream target configuration:
 
 - status: `In Progress`, ID `2543412000000031001`, verified;
 - tag: `automation`, ID `2543412000001391053`;
 - tag: `internal-work`, ID `2543412000001391061`.
 
-No other tags are configured. No Projects network request occurred.
+No other tags are configured. The descriptions preserve WorkDrive file ID, filename, folder path, original source bullet, normalized task text, owner decision, raw due text, and action hash. No Projects network request occurred.
+
+## Deluge Production Direction
+
+Python remains local proof and fixture generation only. The final production path must port both parser passes and the deterministic QC review to Deluge inside the future Zoho Flow/WorkDrive workflow. That port must match the checked-in Python parser and QC expected JSON before any live task creation is considered. No OpenAI, Claude, or other external LLM interpretation is part of this design.
 
 ## Test
 
-The sanitized-fixture tests verify Blake-target enforcement before parsing, the zero-action boundary, one received WorkDrive file, empty payload candidate list, exact status/tag configuration, zero URL opens, zero task-client calls, and no registry persistence:
+The sanitized-fixture tests verify Blake-target enforcement, unchanged raw parser output, a smaller expected QC selection, reasoned skips, payload generation only for selected hashes, explicit-only Blake ownership, source traceability, exact status/tag configuration, zero URL opens, zero task-client calls, and no registry persistence:
 
 ```bash
 python3 -m unittest tests.test_workdrive_real_file_dry_run -v

@@ -57,6 +57,57 @@ INLINE_SEPARATOR_RE = re.compile(r"\s+(?:—|–)\s+|\s+-\s+(?=(?:Owners?|Assign
 
 OWNER_SPLIT_RE = re.compile(r"\s*(?:,|;|/|&|\+|\band\b)\s*", re.IGNORECASE)
 
+EMBEDDED_ACTION_FORMS = {
+    "conduct": "Conduct",
+    "conducting": "Conduct",
+    "confirm": "Confirm",
+    "confirming": "Confirm",
+    "evaluate": "Evaluate",
+    "evaluating": "Evaluate",
+    "fix": "Fix",
+    "fixing": "Fix",
+    "implement": "Implement",
+    "implementing": "Implement",
+    "mass import": "Mass import",
+    "mass importing": "Mass import",
+    "refine": "Refine",
+    "refining": "Refine",
+    "test": "Test",
+    "testing": "Test",
+    "validate": "Validate",
+    "validating": "Validate",
+}
+
+_EMBEDDED_FORMS_PATTERN = "|".join(
+    sorted((re.escape(value) for value in EMBEDDED_ACTION_FORMS), key=len, reverse=True)
+)
+EMBEDDED_ACTION_START_RE = re.compile(
+    rf"^(?:to\s+)?(?:{_EMBEDDED_FORMS_PATTERN})\b",
+    re.IGNORECASE,
+)
+NEXT_STEPS_RE = re.compile(
+    r"\b(?:key\s+)?next steps\s*(?:include|are|:)\s*(?P<actions>.+)$",
+    re.IGNORECASE,
+)
+PLANS_TO_RE = re.compile(r"\bplans to\s+(?P<actions>.+)$", re.IGNORECASE)
+IS_PLANNED_TO_RE = re.compile(
+    r"^(?P<subject>.+?)\s+is planned to\s+(?P<actions>.+)$",
+    re.IGNORECASE,
+)
+FUTURE_ACTION_RE = re.compile(
+    r"\b(?:will|must|should|need to|needs to)\s+(?P<actions>.+)$",
+    re.IGNORECASE,
+)
+NEEDS_VALIDATION_RE = re.compile(
+    r"^(?P<subject>.+?)\s+(?:requires?|requiring|needs?)\s+(?:further\s+)?validation\b",
+    re.IGNORECASE,
+)
+EXPLICIT_BLAKE_RE = re.compile(r"\bBlake(?:\s+Allard)?\b", re.IGNORECASE)
+EMBEDDED_DUE_RE = re.compile(
+    r"\s+(?:[—–-]\s*)?Due(?:\s+Date)?\s*:\s*(?P<due>.+)$",
+    re.IGNORECASE,
+)
+
 
 def _normalized_text(value: str) -> str:
     return " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
@@ -295,6 +346,170 @@ def _parse_section(lines: list[str], source_file_name: str) -> list[dict[str, ob
     return items
 
 
+def _clean_embedded_clause(clause: str) -> str | None:
+    clean = clause.strip().strip("-–—• ").rstrip(". ;:")
+    clean = re.sub(r"^(?:and\s+|to\s+)", "", clean, flags=re.IGNORECASE)
+    if not clean:
+        return None
+
+    lowered = clean.casefold()
+    for form in sorted(EMBEDDED_ACTION_FORMS, key=len, reverse=True):
+        if lowered == form or lowered.startswith(f"{form} "):
+            remainder = clean[len(form):]
+            return f"{EMBEDDED_ACTION_FORMS[form]}{remainder}".strip()
+    return None
+
+
+def _split_embedded_actions(value: str) -> list[str]:
+    parts = re.split(
+        rf"\s*;\s*|\s*,\s*(?:and\s+)?|\s+and\s+(?=(?:to\s+)?(?:{_EMBEDDED_FORMS_PATTERN})\b)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    actions: list[str] = []
+    for part in parts:
+        action = _clean_embedded_clause(part)
+        if action and action not in actions:
+            actions.append(action)
+    return actions
+
+
+def _generic_planned_action(value: str) -> str | None:
+    clean = value.strip().rstrip(". ;:")
+    clean = re.sub(r"^to\s+", "", clean, flags=re.IGNORECASE)
+    if not clean:
+        return None
+    return clean[:1].upper() + clean[1:]
+
+
+def _embedded_action_texts(body: str) -> list[str]:
+    candidate = body.strip()
+    next_steps = NEXT_STEPS_RE.search(candidate)
+    if next_steps:
+        return _split_embedded_actions(next_steps.group("actions"))
+
+    plans_to = PLANS_TO_RE.search(candidate)
+    if plans_to:
+        action_value = plans_to.group("actions")
+        actions = _split_embedded_actions(action_value)
+        if actions:
+            return actions
+        fallback = _generic_planned_action(action_value)
+        return [fallback] if fallback else []
+
+    planned = IS_PLANNED_TO_RE.match(candidate.rstrip(". "))
+    if planned:
+        subject = planned.group("subject").strip()
+        planned_value = planned.group("actions").strip().rstrip(". ;:")
+        actions = _split_embedded_actions(planned_value)
+        if subject.casefold().startswith(("a mass import", "the mass import", "mass import")):
+            mass_import = re.sub(r"^(?:a|the)\s+", "", subject, flags=re.IGNORECASE)
+            planned_value = planned_value[:1].lower() + planned_value[1:]
+            return [f"Mass import{mass_import[len('mass import'):]} to {planned_value}"]
+        if not actions:
+            fallback = _generic_planned_action(planned_value)
+            return [fallback] if fallback else []
+        return actions
+
+    validation = NEEDS_VALIDATION_RE.match(candidate.rstrip(". "))
+    if validation:
+        subject = validation.group("subject").strip().strip("-–—• ").rstrip(",")
+        remains_in = re.match(r"(?P<issue>.+?)\s+remains in\s+(?P<target>.+)$", subject, re.IGNORECASE)
+        if remains_in:
+            issue = remains_in.group("issue").strip().lower()
+            target = remains_in.group("target").strip().lower()
+            return [f"Validate {target} for {issue}"]
+        if not subject.isupper():
+            subject = subject[:1].lower() + subject[1:]
+        return [f"Validate {subject}"]
+
+    future = FUTURE_ACTION_RE.search(candidate)
+    if future:
+        return _split_embedded_actions(future.group("actions"))
+
+    if EMBEDDED_ACTION_START_RE.match(candidate):
+        action = _clean_embedded_clause(candidate)
+        return [action] if action else []
+    return []
+
+
+def _make_embedded_item(
+    source_file_name: str,
+    action_text: str,
+    original_source_text: str,
+    due_date_text: str | None,
+) -> dict[str, object]:
+    explicit_blake = EXPLICIT_BLAKE_RE.search(original_source_text)
+    detected_owners: list[dict[str, str | None]] = []
+    owner_raw: str | None = None
+    owner_id: str | None = None
+    owner_resolution = "missing"
+    if explicit_blake:
+        owner_raw = explicit_blake.group(0)
+        owner_id = OWNER_MAP["blake"][1]
+        owner_resolution = "matched"
+        detected_owners = [
+            {
+                "name": owner_raw,
+                "canonical_name": "Blake Allard",
+                "owner_id": owner_id,
+                "resolution": "matched",
+            }
+        ]
+
+    return {
+        "action_text": action_text,
+        "owner_raw": owner_raw,
+        "owner_resolution": owner_resolution,
+        "owner_id": owner_id,
+        "detected_owners": detected_owners,
+        "due_date_text": due_date_text,
+        "source_file_name": source_file_name,
+        "original_source_text": original_source_text,
+        "extraction_mode": "embedded_zoho_ai",
+        "action_hash": _action_hash(source_file_name, action_text),
+    }
+
+
+def _parse_embedded_actions(text: str, source_file_name: str) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    inside_strict_section = False
+    seen_hashes: set[str] = set()
+
+    for line in text.splitlines():
+        if SECTION_HEADING_RE.match(line):
+            inside_strict_section = True
+            continue
+        if inside_strict_section:
+            if not BULLET_RE.match(line) and _is_major_heading(line):
+                inside_strict_section = False
+            else:
+                continue
+
+        bullet = BULLET_RE.match(line)
+        if not bullet:
+            continue
+        body = bullet.group("body").strip()
+        original_source_text = line.strip()
+        due_match = EMBEDDED_DUE_RE.search(body)
+        due_date_text = None
+        if due_match:
+            due_date_text = due_match.group("due").strip().rstrip(".") or None
+            body = body[:due_match.start()].rstrip()
+        for action_text in _embedded_action_texts(body):
+            item = _make_embedded_item(
+                source_file_name,
+                action_text,
+                original_source_text,
+                due_date_text,
+            )
+            action_hash = str(item["action_hash"])
+            if action_hash not in seen_hashes:
+                items.append(item)
+                seen_hashes.add(action_hash)
+    return items
+
+
 def parse_summary(path: Path) -> list[dict[str, object]]:
     if not path.name.endswith("_summary.txt"):
         raise ValueError(f"expected an _summary.txt file: {path}")
@@ -305,6 +520,7 @@ def parse_summary(path: Path) -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
     for section in _action_sections(text):
         items.extend(_parse_section(section, path.name))
+    items.extend(_parse_embedded_actions(text, path.name))
     return items
 
 

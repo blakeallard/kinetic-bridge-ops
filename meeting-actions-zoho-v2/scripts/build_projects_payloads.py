@@ -138,11 +138,22 @@ def _build_description(item: Mapping[str, Any], meeting_name: str) -> str:
     owner_raw = _optional_text(item.get("owner_raw"))
     due_date_text = _optional_text(item.get("due_date_text"))
     detected_owners = _format_detected_owners(item.get("detected_owners"))
+    source_file_id = _optional_text(item.get("source_file_id"))
+    source_folder_path = _optional_text(item.get("source_folder_path"))
+    original_source_text = _optional_text(item.get("original_source_text"))
 
     lines = [
         "Source: Zoho AI meeting summary",
         f"Summary file: {source_file_name}",
-        f"Meeting name: {meeting_name}",
+    ]
+    if source_file_id is not None:
+        lines.append(f"Source file ID: {source_file_id}")
+    if source_folder_path is not None:
+        lines.append(f"Source folder path: {source_folder_path}")
+    lines.append(f"Meeting name: {meeting_name}")
+    if original_source_text is not None:
+        lines.append(f"Original source text: {original_source_text}")
+    lines.extend([
         f"Original action text: {action_text}",
         f"Owner raw: {owner_raw if owner_raw is not None else 'Not provided'}",
         f"Owner resolution: {owner_resolution}",
@@ -152,7 +163,7 @@ def _build_description(item: Mapping[str, Any], meeting_name: str) -> str:
         f"Action hash: {action_hash}",
         "",
         "Workflow Diagnostic",
-    ]
+    ])
     lines.extend(
         f"{field}: {DIAGNOSTIC_PLACEHOLDER}"
         for field in WORKFLOW_DIAGNOSTIC_FIELDS
