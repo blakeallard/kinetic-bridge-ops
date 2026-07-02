@@ -6,7 +6,7 @@ The primary question is: **Can Zoho-generated meeting summaries produce usable Z
 
 ## Status
 
-Stage 8 Deluge parser/QC port. The repository contains the validated local parser, post-parse candidate review, Deluge parser/QC draft, payload builder, in-memory duplicate registry, and a two-key create-task guard. Dry-run remains the default, and no live Zoho call has been made.
+Stage 9 Deluge runtime validation is pending. The Stage 8 parser/QC port and local projection tests are complete, but `zoho_all` exposes no Deluge/Flow/custom-function execution tool, so no Zoho runtime result has been claimed. Dry-run remains the default, and no live Zoho call has been made.
 
 The existing production `meeting-actions` repository identified in the project brief remains independent and unchanged.
 
@@ -127,8 +127,9 @@ legacy_*                                Read-only v1 reference files
 7. Validate the real WorkDrive-file dry-run path. (Complete)
 8. Filter noisy/overlapping parser candidates before payload generation. (Complete)
 9. Port validated parser/QC behavior to Deluge. (Draft complete; Zoho runtime validation pending)
-10. Configure the Zoho workflow only after separate authorization.
-11. Run separately authorized live pilot validation.
-12. Remove the Blake-only rollout restriction only after human review.
+10. Validate the Deluge draft in an authorized inert Zoho runtime. (Blocked: no MCP execution surface)
+11. Configure the Zoho workflow only after separate authorization.
+12. Run separately authorized live pilot validation.
+13. Remove the Blake-only rollout restriction only after human review.
 
 No step in this sequence requires stopping or modifying v1.

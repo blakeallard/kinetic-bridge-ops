@@ -13,6 +13,29 @@ The Python implementations remain the executable source of truth:
 
 The Deluge draft is structurally compared with local fixtures but has not been executed in a Zoho Flow or WorkDrive Deluge runtime. Product-runtime parity must be verified before workflow wiring or live task creation.
 
+## Stage 9 Runtime Validation Status
+
+**Status: blocked/pending — no Zoho runtime result was produced.**
+
+The `zoho_all` MCP connection was available during the Stage 9 capability audit. It exposed 161 tools across Bigin, Analytics, Books, CRM, Mail, People, Projects, WorkDrive, and Writer, but exposed zero tools for Zoho Flow, Deluge, custom functions, Creator, Catalyst, serverless functions, sandbox execution, or function test execution.
+
+The available WorkDrive tools can read metadata or download files, but cannot compile or execute Deluge. Projects APIs are irrelevant to parser validation and were not called. No safe inert runtime surface was available through MCP, so the draft was not pasted, saved, deployed, or executed in Zoho. No Zoho data or configuration was modified.
+
+The expected values below remain local expectations, not Zoho-runtime-verified results:
+
+| Field/check | Expected |
+| --- | --- |
+| `parser_version` | `deluge-stage8-v2` |
+| `raw_action_count` | `13` |
+| `selected_action_count` | `8` |
+| `skipped_candidate_count` | `5` |
+| `payload_input_items` | Deep-equal to `parsed_actions_selected` |
+| `items` | Deep-equal to `parsed_actions_selected` |
+| `errors` | Empty list |
+| Network/task/write operations | None |
+
+Do not mark Stage 9 complete until an authorized Zoho runtime returns and records those values.
+
 ## Input Contract
 
 The function receives one `flow_input` map:
@@ -33,6 +56,14 @@ return type: KEY-VALUE / MAP
 ```
 
 Some Zoho editors provide the outer signature; in that case paste only the function body.
+
+### Editor-signature adaptation
+
+Signature adaptation is likely because Zoho products differ in whether the editor accepts a complete function declaration or configures the name, argument, and return type in UI fields. This repository does not establish which editor will be used, so it does not claim one syntax is supported.
+
+- If the editor accepts a full declaration, paste the complete contents of `deluge/parse_meeting_summary.deluge`.
+- If the editor separately configures function metadata, configure the map input/return contract shown above and paste only the statements inside the outermost braces.
+- Do not rewrite inner parser/QC logic merely to satisfy an assumed editor signature. Record the actual compiler message and product/editor used first.
 
 ## Output Contract
 
@@ -174,3 +205,21 @@ Before Flow/WorkDrive wiring:
 6. Record any regex, list-order, substring, Unicode, or hash difference before changing the Python source of truth.
 
 No WorkDrive fetch, registry write, Projects call, or task creation is part of that validation.
+
+### Exact pending manual validation procedure
+
+Use this procedure only in an explicitly authorized inert Deluge test surface:
+
+1. Open a non-production custom-function test editor that can run a function without attaching it to a Flow, workflow, schedule, button, or data event.
+2. Apply only the editor-signature adaptation described above.
+3. Paste the function source from `deluge/parse_meeting_summary.deluge`.
+4. Load the complete map from `samples/deluge/stage8_workdrive_flow_input.json` as `flow_input`; do not add a WorkDrive fetch.
+5. Execute only the function test and capture the returned map.
+6. Confirm `dry_run` is true and `errors` is empty.
+7. Compare the three counts and selected/skipped projections against `samples/deluge/stage8_expected_projection.json`.
+8. Deep-compare `payload_input_items` and `items` with `parsed_actions_selected`.
+9. Compare raw action text, owner, due, source, and hash fields with the Python expected fixtures. Ignore `fallback_idempotency_key` only when comparing to Python because it is Deluge-specific.
+10. Record the Zoho product/editor, timestamp, compiler/runtime messages, returned projection, and any hash/order differences.
+11. Exit without saving deployment wiring, creating a Flow, fetching WorkDrive content, persisting registry state, or calling Projects.
+
+If the chosen editor requires saving or deploying a function before it can run, stop and obtain explicit authorization for that Zoho configuration change.
