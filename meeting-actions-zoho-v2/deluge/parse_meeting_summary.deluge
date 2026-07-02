@@ -1,8 +1,9 @@
 /*
- * Zoho-only meeting-actions v2: conservative parser draft.
+ * Zoho-only meeting-actions v2: Stage 8 parser + deterministic QC draft.
  *
  * SOURCE OF TRUTH:
- *   scripts/parse_summary.py and samples/expected/*.json
+ *   scripts/parse_summary.py, scripts/review_action_candidates.py,
+ *   and samples/expected/*.json
  *
  * EXPECTED ZOHO FLOW OR WORKDRIVE WRAPPER INPUT:
  *   flow_input (MAP)
@@ -13,7 +14,8 @@
  *
  * This function does not fetch a file, call invokeurl, call Zoho Projects,
  * create a task, mutate a registry, or perform any other external write.
- * It returns a dry-run MAP containing an items LIST.
+ * It returns raw actions, reasoned QC skips, selected actions, and an items
+ * alias containing selected actions only.
  *
  * Function signature syntax can vary by Zoho product. In a Zoho editor that
  * configures name/arguments/return type in the UI, configure:
@@ -35,7 +37,7 @@ map parse_meeting_summary(map flow_input)
 	file_text = ifnull(file_text_value, "").toString();
 
 	result.put("dry_run", true);
-	result.put("parser_version", "deluge-draft-v1");
+	result.put("parser_version", "deluge-stage8-v2");
 	result.put("file_id", file_id);
 	result.put("file_name", file_name);
 	result.put("file_path", file_path);
@@ -57,6 +59,10 @@ map parse_meeting_summary(map flow_input)
 	{
 		result.put("items", items);
 		result.put("item_count", 0);
+		result.put("parsed_actions_raw", items);
+		result.put("skipped_candidate_reviews", List());
+		result.put("parsed_actions_selected", items);
+		result.put("payload_input_items", items);
 		result.put("errors", errors);
 		return result;
 	}
@@ -241,7 +247,276 @@ map parse_meeting_summary(map flow_input)
 	}
 
 	/*
-	 * Second pass: split inline metadata, resolve explicit owners, preserve raw
+	 * Embedded Zoho AI pass. Real summaries often express future work inside
+	 * ordinary numbered/bulleted summary lines rather than under a clean action
+	 * heading. This pass is separate so the strict section behavior above stays
+	 * unchanged. Only fixed future-work phrases and action verbs are accepted.
+	 */
+	embedded_in_strict_section = false;
+	embedded_seen_actions = List();
+	for each line in lines
+	{
+		trimmed = line.trim();
+		heading_candidate = trimmed.replaceFirst("^#{1,6}\\s*", "");
+		heading_candidate = heading_candidate.replaceFirst(":\\s*$", "").trim().toLowerCase();
+		if(approved_sections.contains(heading_candidate))
+		{
+			embedded_in_strict_section = true;
+			continue;
+		}
+
+		is_bullet = line.matches("^\\s*([-*•]|[0-9]+[.)])\\s+.+$");
+		is_markdown_heading = trimmed.matches("^#{1,6}\\s+.+$");
+		is_known_major = known_major_headings.contains(heading_candidate);
+		is_plain_generic_heading = false;
+		if(line == line.ltrim() && trimmed.length() > 0 && trimmed.length() <= 80)
+		{
+			plain_heading_pattern = "^([A-Z][A-Za-z0-9'()/&-]*|and|or|of|the|to|for|in|on|&)(\\s+([A-Z][A-Za-z0-9'()/&-]*|and|or|of|the|to|for|in|on|&)){0,7}:?$";
+			is_plain_generic_heading = trimmed.matches(plain_heading_pattern);
+		}
+		if(embedded_in_strict_section && !is_bullet && (is_markdown_heading || is_known_major || is_plain_generic_heading))
+		{
+			embedded_in_strict_section = false;
+		}
+		if(embedded_in_strict_section || !is_bullet)
+		{
+			continue;
+		}
+
+		original_source_text = trimmed;
+		body = line.replaceFirst("^\\s*([-*•]|[0-9]+[.)])\\s+", "").trim();
+		body_lower = body.toLowerCase();
+		embedded_due_value = "";
+		due_label_index = body_lower.indexOf("due:");
+		if(due_label_index >= 0)
+		{
+			embedded_due_value = body.subString(due_label_index + 4, body.length()).trim();
+			embedded_due_value = embedded_due_value.replaceFirst("[.]+$", "").trim();
+			body = body.subString(0, due_label_index).replaceFirst("[ —–-]+$", "").trim();
+			body_lower = body.toLowerCase();
+		}
+
+		action_source = "";
+		next_steps_include = body_lower.indexOf("next steps include");
+		next_steps_colon = body_lower.indexOf("next steps:");
+		next_steps_are = body_lower.indexOf("next steps are");
+		plans_to_index = body_lower.indexOf("plans to");
+		planned_to_index = body_lower.indexOf(" is planned to ");
+		if(next_steps_include >= 0)
+		{
+			action_source = body.subString(next_steps_include + 18, body.length()).trim();
+		}
+		else if(next_steps_colon >= 0)
+		{
+			action_source = body.subString(next_steps_colon + 11, body.length()).trim();
+		}
+		else if(next_steps_are >= 0)
+		{
+			action_source = body.subString(next_steps_are + 14, body.length()).trim();
+		}
+		else if(plans_to_index >= 0)
+		{
+			action_source = body.subString(plans_to_index + 8, body.length()).trim();
+		}
+		else if(planned_to_index >= 0)
+		{
+			planned_subject = body.subString(0, planned_to_index).trim();
+			planned_value = body.subString(planned_to_index + 15, body.length()).replaceFirst("[. ;:]+$", "").trim();
+			if(planned_subject.toLowerCase().matches("^(a |the )?mass import.*$"))
+			{
+				planned_subject = planned_subject.replaceFirst("^(A|a|The|the)\\s+", "");
+				action_source = planned_subject + " to " + planned_value;
+			}
+			else
+			{
+				action_source = planned_value;
+			}
+		}
+		else
+		{
+			validation_marker = "";
+			validation_markers = {" requiring validation"," requires validation"," require validation"," needs validation"," need validation"," requiring further validation"," requires further validation"," require further validation"," needs further validation"," need further validation"};
+			for each marker in validation_markers
+			{
+				if(validation_marker == "" && body_lower.indexOf(marker) >= 0)
+				{
+					validation_marker = marker;
+				}
+			}
+			if(validation_marker != "")
+			{
+				validation_index = body_lower.indexOf(validation_marker);
+				validation_subject = body.subString(0, validation_index).replaceFirst("[, ]+$", "").trim();
+				remains_in_index = validation_subject.toLowerCase().indexOf(" remains in ");
+				if(remains_in_index >= 0)
+				{
+					validation_issue = validation_subject.subString(0, remains_in_index).trim().toLowerCase();
+					validation_target = validation_subject.subString(remains_in_index + 12, validation_subject.length()).trim().toLowerCase();
+					action_source = "Validate " + validation_target + " for " + validation_issue;
+				}
+				else if(validation_subject != "")
+				{
+					if(validation_subject == validation_subject.toUpperCase())
+					{
+						action_source = "Validate " + validation_subject;
+					}
+					else
+					{
+						action_source = "Validate " + validation_subject.subString(0,1).toLowerCase() + validation_subject.subString(1,validation_subject.length());
+					}
+				}
+			}
+			else
+			{
+				future_index = -1;
+				future_marker = "";
+				future_markers = {"will ","must ","should ","need to ","needs to "};
+				for each marker in future_markers
+				{
+					marker_index = body_lower.indexOf(marker);
+					if(marker_index >= 0 && (future_index == -1 || marker_index < future_index))
+					{
+						future_index = marker_index;
+						future_marker = marker;
+					}
+				}
+				if(future_index >= 0)
+				{
+					action_source = body.subString(future_index + future_marker.length(), body.length()).trim();
+				}
+				else if(body_lower.matches("^(conduct|conducting|confirm|confirming|evaluate|evaluating|fix|fixing|implement|implementing|mass import|mass importing|refine|refining|test|testing|validate|validating)\\b.*$"))
+				{
+					action_source = body;
+				}
+			}
+		}
+
+		if(action_source == "")
+		{
+			continue;
+		}
+		action_source = action_source.replaceAllIgnoreCase(", and ", ",");
+		action_source = action_source.replaceAll(";", ",", true);
+		embedded_forms = {"conduct","conducting","confirm","confirming","evaluate","evaluating","fix","fixing","implement","implementing","mass import","mass importing","refine","refining","test","testing","validate","validating"};
+		for each embedded_form in embedded_forms
+		{
+			action_source = action_source.replaceAllIgnoreCase(" and " + embedded_form + " ", "," + embedded_form + " ");
+		}
+		action_parts = action_source.toList(",");
+		for each embedded_part in action_parts
+		{
+			embedded_action = embedded_part.toString().trim().replaceFirst("^(and|And|AND|to|To|TO)\\s+", "").replaceFirst("[. ;:]+$", "").trim();
+			embedded_lower = embedded_action.toLowerCase();
+			canonical_action = "";
+			if(embedded_lower.matches("^testing\\b.*$"))
+			{
+				canonical_action = "Test" + embedded_action.subString(7,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^test\\b.*$"))
+			{
+				canonical_action = "Test" + embedded_action.subString(4,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^validating\\b.*$"))
+			{
+				canonical_action = "Validate" + embedded_action.subString(10,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^validate\\b.*$"))
+			{
+				canonical_action = "Validate" + embedded_action.subString(8,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^implementing\\b.*$"))
+			{
+				canonical_action = "Implement" + embedded_action.subString(12,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^implement\\b.*$"))
+			{
+				canonical_action = "Implement" + embedded_action.subString(9,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^refining\\b.*$"))
+			{
+				canonical_action = "Refine" + embedded_action.subString(8,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^refine\\b.*$"))
+			{
+				canonical_action = "Refine" + embedded_action.subString(6,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^conducting\\b.*$"))
+			{
+				canonical_action = "Conduct" + embedded_action.subString(10,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^conduct\\b.*$"))
+			{
+				canonical_action = "Conduct" + embedded_action.subString(7,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^evaluating\\b.*$"))
+			{
+				canonical_action = "Evaluate" + embedded_action.subString(10,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^evaluate\\b.*$"))
+			{
+				canonical_action = "Evaluate" + embedded_action.subString(8,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^confirming\\b.*$"))
+			{
+				canonical_action = "Confirm" + embedded_action.subString(10,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^confirm\\b.*$"))
+			{
+				canonical_action = "Confirm" + embedded_action.subString(7,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^fixing\\b.*$"))
+			{
+				canonical_action = "Fix" + embedded_action.subString(6,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^fix\\b.*$"))
+			{
+				canonical_action = "Fix" + embedded_action.subString(3,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^mass importing\\b.*$"))
+			{
+				canonical_action = "Mass import" + embedded_action.subString(14,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^mass import\\b.*$"))
+			{
+				canonical_action = "Mass import" + embedded_action.subString(11,embedded_action.length());
+			}
+			else if(plans_to_index >= 0 || planned_to_index >= 0)
+			{
+				canonical_action = embedded_action.subString(0,1).toUpperCase() + embedded_action.subString(1,embedded_action.length());
+			}
+
+			if(canonical_action == "")
+			{
+				continue;
+			}
+			embedded_identity = canonical_action.toLowerCase().replaceAll("\\s+", " ").trim();
+			if(embedded_seen_actions.contains(embedded_identity))
+			{
+				continue;
+			}
+			embedded_seen_actions.add(embedded_identity);
+			embedded_owner_values = List();
+			if(original_source_text.toLowerCase().matches(".*\\bblake( allard)?\\b.*"))
+			{
+				embedded_owner_values.add("Blake");
+			}
+			embedded_due_values = List();
+			if(embedded_due_value != "")
+			{
+				embedded_due_values.add(embedded_due_value);
+			}
+			raw_candidate = Map();
+			raw_candidate.put("body", canonical_action);
+			raw_candidate.put("owner_values", embedded_owner_values);
+			raw_candidate.put("due_values", embedded_due_values);
+			raw_candidate.put("original_source_text", original_source_text);
+			raw_candidate.put("extraction_mode", "embedded_zoho_ai");
+			raw_candidates.add(raw_candidate);
+		}
+	}
+
+	/*
+	 * Item construction pass: split inline metadata, resolve explicit owners, preserve raw
 	 * due text, and construct the Python-compatible item shape.
 	 */
 	inline_marker = "|||V2_FIELD|||";
@@ -504,15 +779,258 @@ map parse_meeting_summary(map flow_input)
 		item.put("owner_id", resolved_owner_id);
 		item.put("detected_owners", detected_owners);
 		item.put("due_date_text", due_date_text);
+		item.put("source_file_id", file_id);
 		item.put("source_file_name", file_name);
+		item.put("source_folder_path", file_path);
+		if(raw_candidate.get("original_source_text") != null)
+		{
+			item.put("original_source_text", raw_candidate.get("original_source_text"));
+		}
+		if(raw_candidate.get("extraction_mode") != null)
+		{
+			item.put("extraction_mode", raw_candidate.get("extraction_mode"));
+		}
 		item.put("action_hash", action_hash);
 		item.put("fallback_idempotency_key", fallback_idempotency_key);
 		items.add(item);
 	}
 
-	result.put("items", items);
-	result.put("item_count", items.size());
+	/*
+	 * Deterministic QC pass matching scripts/review_action_candidates.py.
+	 * Grouping is scoped to this source identity. Specificity is a lexicographic
+	 * tuple encoded as phrase_score, concrete token count, then text length.
+	 */
+	qc_group_keys = List();
+	qc_signatures = List();
+	qc_scores = List();
+	qc_group_state = Map();
+	qc_index = 0;
+	action_verbs = {"conduct","confirm","evaluate","fix","implement","mass","refine","test","validate"};
+	for each item in items
+	{
+		action_text = item.get("action_text").toString();
+		action_lower = action_text.toLowerCase();
+		token_text = " " + action_lower.replaceAll("[^a-z0-9]+", " ").replaceAll("\\s+", " ").trim() + " ";
+		token_text = token_text.replaceAll(" descriptions ", " description ", true);
+		token_text = token_text.replaceAll(" fields ", " field ", true);
+		token_text = token_text.replaceAll(" imports ", " import ", true);
+		token_text = token_text.replaceAll(" imported ", " import ", true);
+		token_text = token_text.replaceAll(" importing ", " import ", true);
+		token_text = token_text.replaceAll(" lookups ", " lookup ", true);
+		token_text = token_text.replaceAll(" tests ", " test ", true);
+		token_text = token_text.replaceAll(" testing ", " test ", true);
+		token_text = token_text.replaceAll(" updates ", " import ", true);
+		token_text = token_text.replaceAll(" updating ", " import ", true);
+		token_text = token_text.replaceAll(" validation ", " validate ", true);
+		token_text = token_text.replaceAll(" validating ", " validate ", true);
+		token_text = token_text.replaceAll("\\s+", " ").trim();
+
+		intent_group = "exact:" + token_text;
+		if(action_lower.startsWith("mass import"))
+		{
+			intent_group = "mass_import";
+		}
+		else if(token_text.matches(".*\\btranscription\\b.*") && (token_text.matches(".*\\bevaluate\\b.*") || token_text.matches(".*\\btest\\b.*")))
+		{
+			intent_group = "transcription_evaluation";
+		}
+		else if(token_text.matches(".*\\brouting\\b.*") && (token_text.matches(".*\\bconduct\\b.*") || token_text.matches(".*\\btest\\b.*")))
+		{
+			intent_group = "routing_test";
+		}
+		else if(token_text.matches(".*\\brouting\\b.*") && (token_text.matches(".*\\bfix\\b.*") || token_text.matches(".*\\brefine\\b.*")))
+		{
+			intent_group = "routing_remediation";
+		}
+		else if(token_text.matches(".*\\blookup\\b.*"))
+		{
+			intent_group = "part_number_lookup";
+		}
+		else if(token_text.matches(".*\\bimplement\\b.*") && (token_text.matches(".*\\bautomated\\b.*") || token_text.matches(".*\\bimport\\b.*")))
+		{
+			intent_group = "automated_import";
+		}
+		else if((token_text.matches(".*\\bvalidate\\b.*") || token_text.matches(".*\\btest\\b.*")) && token_text.matches(".*\\b(accuracy|corruption|description|field|item|master|population)\\b.*"))
+		{
+			intent_group = "field_data_validation";
+		}
+		else if(token_text.matches(".*\\bconfirm\\b.*") && token_text.matches(".*\\blaunch\\b.*"))
+		{
+			intent_group = "launch_confirmation";
+		}
+
+		phrase_score = 0;
+		if(action_lower.contains("field population"))
+		{
+			phrase_score = phrase_score + 8;
+		}
+		if(action_lower.contains("pricing import"))
+		{
+			phrase_score = phrase_score + 7;
+		}
+		if(action_lower.contains("automated import"))
+		{
+			phrase_score = phrase_score + 5;
+		}
+		if(action_lower.contains("part number"))
+		{
+			phrase_score = phrase_score + 6;
+		}
+		if(action_lower.contains("duplicate routing"))
+		{
+			phrase_score = phrase_score + 7;
+		}
+		if(action_lower.contains("before launch"))
+		{
+			phrase_score = phrase_score + 4;
+		}
+		if(action_lower.contains("transcription accuracy"))
+		{
+			phrase_score = phrase_score + 5;
+		}
+		if(action_lower.contains("item master"))
+		{
+			phrase_score = phrase_score + 6;
+		}
+		if(action_lower.contains("data corruption"))
+		{
+			phrase_score = phrase_score + 3;
+		}
+
+		unique_concrete_tokens = List();
+		for each qc_token in token_text.toList(" ")
+		{
+			qc_token = qc_token.toString().trim();
+			if(qc_token != "" && !action_verbs.contains(qc_token) && !unique_concrete_tokens.contains(qc_token))
+			{
+				unique_concrete_tokens.add(qc_token);
+			}
+		}
+		qc_score = phrase_score * 100000 + unique_concrete_tokens.size() * 1000 + action_text.length();
+		source_identity = file_id;
+		if(source_identity == "")
+		{
+			source_identity = file_name;
+		}
+		full_group_key = source_identity + "::" + intent_group;
+		qc_group_keys.add(intent_group);
+		qc_signatures.add(token_text);
+		qc_scores.add(qc_score);
+
+		should_select = false;
+		if(!qc_group_state.containKey(full_group_key))
+		{
+			should_select = true;
+		}
+		else if(qc_score > qc_group_state.get(full_group_key).get("score"))
+		{
+			should_select = true;
+		}
+		if(should_select)
+		{
+			selected_state = Map();
+			selected_state.put("index", qc_index);
+			selected_state.put("score", qc_score);
+			selected_state.put("signature", token_text);
+			selected_state.put("item", item);
+			qc_group_state.put(full_group_key, selected_state);
+		}
+		qc_index = qc_index + 1;
+	}
+
+	selected_items = List();
+	skipped_candidate_reviews = List();
+	qc_index = 0;
+	for each item in items
+	{
+		intent_group = qc_group_keys.get(qc_index);
+		source_identity = file_id;
+		if(source_identity == "")
+		{
+			source_identity = file_name;
+		}
+		full_group_key = source_identity + "::" + intent_group;
+		selected_state = qc_group_state.get(full_group_key);
+		selected_item = selected_state.get("item");
+
+		group_size = 0;
+		for each candidate_group_key in qc_group_keys
+		{
+			if(candidate_group_key == intent_group)
+			{
+				group_size = group_size + 1;
+			}
+		}
+
+		if(selected_state.get("index") == qc_index)
+		{
+			selected_copy = Map();
+			selected_copy.put("action_text", item.get("action_text"));
+			selected_copy.put("owner_raw", item.get("owner_raw"));
+			selected_copy.put("owner_resolution", item.get("owner_resolution"));
+			selected_copy.put("owner_id", item.get("owner_id"));
+			selected_copy.put("detected_owners", item.get("detected_owners"));
+			selected_copy.put("due_date_text", item.get("due_date_text"));
+			selected_copy.put("source_file_id", item.get("source_file_id"));
+			selected_copy.put("source_file_name", item.get("source_file_name"));
+			selected_copy.put("source_folder_path", item.get("source_folder_path"));
+			if(item.get("original_source_text") != null)
+			{
+				selected_copy.put("original_source_text", item.get("original_source_text"));
+			}
+			if(item.get("extraction_mode") != null)
+			{
+				selected_copy.put("extraction_mode", item.get("extraction_mode"));
+			}
+			selected_copy.put("action_hash", item.get("action_hash"));
+			selected_copy.put("fallback_idempotency_key", item.get("fallback_idempotency_key"));
+			qc_review = Map();
+			qc_review.put("group_key", intent_group);
+			qc_review.put("group_size", group_size);
+			if(group_size == 1)
+			{
+				qc_review.put("selection_reason", "unique_candidate");
+			}
+			else
+			{
+				qc_review.put("selection_reason", "most_specific_deterministic_candidate");
+			}
+			selected_copy.put("qc_review", qc_review);
+			selected_items.add(selected_copy);
+		}
+		else
+		{
+			skipped = Map();
+			skipped.put("action_hash", item.get("action_hash"));
+			skipped.put("action_text", item.get("action_text"));
+			skipped.put("source_file_name", item.get("source_file_name"));
+			skipped.put("source_file_id", item.get("source_file_id"));
+			skipped.put("original_source_text", item.get("original_source_text"));
+			if(qc_signatures.get(qc_index) == selected_state.get("signature"))
+			{
+				skipped.put("reason", "repeated_summary_candidate");
+			}
+			else
+			{
+				skipped.put("reason", "overlap_superseded_by_specific_candidate");
+			}
+			skipped.put("group_key", intent_group);
+			skipped.put("selected_action_hash", selected_item.get("action_hash"));
+			skipped.put("selected_action_text", selected_item.get("action_text"));
+			skipped_candidate_reviews.add(skipped);
+		}
+		qc_index = qc_index + 1;
+	}
+
+	result.put("parsed_actions_raw", items);
+	result.put("raw_action_count", items.size());
+	result.put("skipped_candidate_reviews", skipped_candidate_reviews);
+	result.put("skipped_candidate_count", skipped_candidate_reviews.size());
+	result.put("parsed_actions_selected", selected_items);
+	result.put("selected_action_count", selected_items.size());
+	result.put("payload_input_items", selected_items);
+	result.put("items", selected_items);
+	result.put("item_count", selected_items.size());
 	result.put("errors", errors);
 	return result;
 }
-

@@ -6,7 +6,7 @@ The primary question is: **Can Zoho-generated meeting summaries produce usable Z
 
 ## Status
 
-Stage 7B deterministic quality control. The repository contains the validated local parser, post-parse candidate review, Deluge strict-parser draft, payload builder, in-memory duplicate registry, and a two-key create-task guard. Dry-run remains the default, and no live Zoho call has been made.
+Stage 8 Deluge parser/QC port. The repository contains the validated local parser, post-parse candidate review, Deluge parser/QC draft, payload builder, in-memory duplicate registry, and a two-key create-task guard. Dry-run remains the default, and no live Zoho call has been made.
 
 The existing production `meeting-actions` repository identified in the project brief remains independent and unchanged.
 
@@ -98,7 +98,9 @@ docs/parity_checklist.md                v1-to-v2 behavior comparison
 docs/projects_payload_builder.md        Projects payload contract
 docs/duplicate_registry.md              Local idempotency/report contract
 docs/live_create_task_guard.md          Stage 6 live guard and blockers
-docs/workdrive_real_file_test.md        Stage 7 real WorkDrive-file dry-run procedure
+docs/workdrive_real_file_test.md        Stage 7/7B real-file parser/QC validation
+docs/zoho_deluge_parser.md              Stage 8 Deluge parser/QC parity contract
+deluge/parse_meeting_summary.deluge     Dry-run Deluge parser/QC draft
 scripts/parse_summary.py                Local JSON dry-run parser
 scripts/review_action_candidates.py     Deterministic post-parse QC filter
 scripts/run_workdrive_dry_run.py        Local WorkDrive-file pipeline orchestrator
@@ -107,6 +109,7 @@ scripts/build_registry_report.py        Local duplicate/report layer
 scripts/create_tasks_guarded.py         Two-key create-task scaffold
 samples/*_summary.txt                   Sanitized parser inputs
 samples/expected/*.json                 Checked-in expected outputs
+samples/deluge/*.json                   Deluge input/projection parity fixtures
 samples/payloads/*.json                 Dry-run payload fixtures
 samples/registry/*.json                 Local registry fixtures
 tests/                                  Parser, payload, registry, and guard tests
@@ -123,8 +126,9 @@ legacy_*                                Read-only v1 reference files
 6. Add task creation behind the two-key live-mode guard. (Scaffold complete; dry-run default)
 7. Validate the real WorkDrive-file dry-run path. (Complete)
 8. Filter noisy/overlapping parser candidates before payload generation. (Complete)
-9. Port validated parser/QC behavior to Deluge and configure the Zoho workflow.
-10. Run separately authorized live pilot validation.
-10. Remove the Blake-only rollout restriction only after human review.
+9. Port validated parser/QC behavior to Deluge. (Draft complete; Zoho runtime validation pending)
+10. Configure the Zoho workflow only after separate authorization.
+11. Run separately authorized live pilot validation.
+12. Remove the Blake-only rollout restriction only after human review.
 
 No step in this sequence requires stopping or modifying v1.

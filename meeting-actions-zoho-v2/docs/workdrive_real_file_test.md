@@ -163,7 +163,7 @@ No other tags are configured. The descriptions preserve WorkDrive file ID, filen
 
 ## Deluge Production Direction
 
-Python remains local proof and fixture generation only. The final production path must port both parser passes and the deterministic QC review to Deluge inside the future Zoho Flow/WorkDrive workflow. That port must match the checked-in Python parser and QC expected JSON before any live task creation is considered. No OpenAI, Claude, or other external LLM interpretation is part of this design.
+Python remains local proof and fixture generation only. Stage 8 now includes a Deluge draft of both parser passes and the deterministic QC review for the future Zoho Flow/WorkDrive workflow. Its local projection matches the checked-in Python parser/QC fixtures, but actual Zoho Deluge runtime parity must still be recorded before workflow wiring or any live task creation. No OpenAI, Claude, or other external LLM interpretation is part of this design.
 
 ## Test
 
