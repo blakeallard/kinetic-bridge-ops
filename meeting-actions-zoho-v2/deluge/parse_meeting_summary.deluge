@@ -35,12 +35,56 @@ map parse_meeting_summary(map flow_input)
 	file_path = ifnull(flow_input.get("file_path"), "").toString().trim();
 	file_text_value = flow_input.get("file_text");
 	file_text = ifnull(file_text_value, "").toString();
+	diagnostic_mode = false;
+	diagnostic_mode_value = flow_input.get("diagnostic_mode");
+	if(diagnostic_mode_value != null && diagnostic_mode_value.toString().trim().toLowerCase() == "true")
+	{
+		diagnostic_mode = true;
+	}
 
 	result.put("dry_run", true);
 	result.put("parser_version", "deluge-stage8-v2");
 	result.put("file_id", file_id);
 	result.put("file_name", file_name);
 	result.put("file_path", file_path);
+
+	/*
+	 * Stage 9 runtime diagnostics. These fields only describe the caller-supplied
+	 * text and line splitting; they do not change parsing behavior.
+	 */
+	normalized_file_text = file_text.replaceAll("\r\n", "\n", true);
+	normalized_file_text = normalized_file_text.replaceAll("\r", "\n", true);
+	normalized_file_text = normalized_file_text.replaceAll("\t", "    ", true);
+	lines = normalized_file_text.toList("\n");
+	if(diagnostic_mode)
+	{
+		first_200_chars = file_text;
+		if(first_200_chars.length() > 200)
+		{
+			first_200_chars = first_200_chars.subString(0,200);
+		}
+		actual_newline_count = file_text.length() - file_text.replaceAll("\n", "", true).length();
+		escaped_newline_length = file_text.length() - file_text.replaceAll("\\n", "", true).length();
+		escaped_newline_sequence_count = escaped_newline_length / 2;
+		bullet_candidate_count = 0;
+		for each diagnostic_line in lines
+		{
+			if(diagnostic_line.matches("^\\s*([-*•]|[0-9]+[.)])\\s+.+$"))
+			{
+				bullet_candidate_count = bullet_candidate_count + 1;
+			}
+		}
+		result.put("diagnostic_mode", true);
+		result.put("file_text_present", file_text_value != null);
+		result.put("file_text_non_empty", file_text.length() > 0);
+		result.put("file_text_length", file_text.length());
+		result.put("normalized_text_length", normalized_file_text.length());
+		result.put("line_count", lines.size());
+		result.put("actual_newline_count", actual_newline_count);
+		result.put("escaped_newline_sequence_count", escaped_newline_sequence_count);
+		result.put("first_200_chars", first_200_chars);
+		result.put("bullet_candidate_count", bullet_candidate_count);
+	}
 
 	if(file_name == "")
 	{
@@ -88,12 +132,6 @@ map parse_meeting_summary(map flow_input)
 
 	approved_sections = {"action item","action items","next actions","next steps"};
 	known_major_headings = {"summary","meeting summary","notes","decisions","key takeaways","transcript","agenda"};
-
-	/* Normalize line endings only. Tabs become four spaces for stable indent checks. */
-	normalized_file_text = file_text.replaceAll("\r\n", "\n", true);
-	normalized_file_text = normalized_file_text.replaceAll("\r", "\n", true);
-	normalized_file_text = normalized_file_text.replaceAll("\t", "    ", true);
-	lines = normalized_file_text.toList("\n");
 
 	/*
 	 * First pass: isolate approved sections and build raw top-level action

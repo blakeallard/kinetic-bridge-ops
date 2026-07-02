@@ -1,5 +1,7 @@
 # Stage 9 Manual Deluge Runtime Validation Checklist
 
+> Runtime update: the first Zoho Creator execution compiled but returned zero actions. Use the diagnostic retry in [`stage9_runtime_results_2026-07-01_creator_failure.md`](stage9_runtime_results_2026-07-01_creator_failure.md) before repeating the full parity checklist. Do not change parser logic until the text/newline/bullet diagnostics are captured.
+
 Use this checklist to execute the existing Stage 8 Deluge parser/QC draft once in an authorized inert Zoho test surface. This is runtime validation only. Do not attach the function to Flow, WorkDrive, Projects, a schedule, a button, or any data event.
 
 The Stage 9 blocker and parser contract remain documented in [`docs/zoho_deluge_parser.md`](zoho_deluge_parser.md). Record the run using [`docs/stage9_runtime_results_template.md`](stage9_runtime_results_template.md).

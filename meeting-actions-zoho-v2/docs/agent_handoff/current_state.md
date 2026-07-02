@@ -4,17 +4,18 @@ Repo:
 - https://github.com/blake-bevco-tech/meeting-actions-zoho-v2
 
 Current baseline:
-- origin/main at b77da95 Add shared agent handoff state
-- active branch: stage-9-runtime-validation
+- origin/main at 14baf3e Merge Stage 9 manual validation package
+- active branch: stage-9-runtime-parity-debug
 
 Current stage:
 - Stage 9: Zoho Deluge runtime validation
-- Status: blocked/pending because no MCP-accessible Zoho Deluge/Flow/custom-function execution surface is available
+- Status: Creator runtime compiled/executed, but parity failed with 0 raw and 0 selected actions
 
 Completed:
 - Stage 8 Deluge parser/QC draft committed
 - Stage 7B deterministic QC committed
-- Local tests pass: 29 tests
+- Local tests pass: 30 tests
+- Initial Creator runtime return recorded; expected 13/8/5 counts, actual 0/0/0
 
 Hard rules:
 - Dry-run only
@@ -27,8 +28,8 @@ Hard rules:
 - Do not push directly to main from agent branches
 
 Next allowed work:
-- Documentation and setup for manual Zoho runtime validation
-- Branch workflow setup for Codex/Claude coordination
+- Run the diagnostic-only Creator retry and record text/newline/line/bullet fields
+- Change normalization only if literal escaped newlines are confirmed
 - No live task creation
 
 Manual validation package:
@@ -37,3 +38,6 @@ Manual validation package:
 - docs/zoho_deluge_parser.md (existing blocker and parser contract)
 - samples/deluge/stage8_workdrive_flow_input.json
 - samples/deluge/stage8_expected_projection.json
+- samples/deluge/stage9_diagnostic_flow_input.json
+- samples/deluge/stage9_expected_diagnostics.json
+- docs/stage9_runtime_results_2026-07-01_creator_failure.md

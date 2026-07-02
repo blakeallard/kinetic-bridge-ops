@@ -15,11 +15,11 @@ The Deluge draft is structurally compared with local fixtures but has not been e
 
 ## Stage 9 Runtime Validation Status
 
-**Status: blocked/pending — no Zoho runtime result was produced.**
+**Status: executed in Zoho Creator; parity failed and diagnostic retry is pending.**
 
-The `zoho_all` MCP connection was available during the Stage 9 capability audit. It exposed 161 tools across Bigin, Analytics, Books, CRM, Mail, People, Projects, WorkDrive, and Writer, but exposed zero tools for Zoho Flow, Deluge, custom functions, Creator, Catalyst, serverless functions, sandbox execution, or function test execution.
+The function `stage9_parser_validation` saved and executed without a compile error in the `Deluge Validation Sandbox` Creator app. Metadata and `parser_version` returned correctly, but all parser/QC counts were zero. The failed return and next diagnostic retry are recorded in [`stage9_runtime_results_2026-07-01_creator_failure.md`](stage9_runtime_results_2026-07-01_creator_failure.md).
 
-The available WorkDrive tools can read metadata or download files, but cannot compile or execute Deluge. Projects APIs are irrelevant to parser validation and were not called. No safe inert runtime surface was available through MCP, so the draft was not pasted, saved, deployed, or executed in Zoho. No Zoho data or configuration was modified.
+Because `errors` was empty, `file_text` was non-null. Its length, newline representation, line count, and bullet detection were not observable in the first run. The parity-debug revision adds opt-in return diagnostics only; it does not alter parser logic or normalize literal escaped newlines.
 
 The expected values below remain local expectations, not Zoho-runtime-verified results:
 
@@ -34,7 +34,7 @@ The expected values below remain local expectations, not Zoho-runtime-verified r
 | `errors` | Empty list |
 | Network/task/write operations | None |
 
-Do not mark Stage 9 complete until an authorized Zoho runtime returns and records those values.
+Do not mark Stage 9 complete until a diagnostic retry isolates the failure and a later authorized runtime returns and records the expected parser/QC projection.
 
 ## Input Contract
 
