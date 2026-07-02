@@ -1,6 +1,7 @@
 # Environment / credentials
 .env
 .env.*
+!.env.example
 *.token
 *token*
 *secret*
@@ -30,3 +31,4 @@ __pycache__/
 # Node (not used here, precaution)
 node_modules/
 .cache/
+.venv/
