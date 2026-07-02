@@ -15,9 +15,9 @@ Non-secret configuration is centralized in constants and `ProjectsPayloadConfig`
 | Portal ID | `898600220` |
 | Project ID | `2543412000001324010` |
 | Status name | Always `In Progress` |
+| Verified status ID | `2543412000000031001` |
 | Known owners | Blake Allard, Bill Beverley, Bryan Ovalle IDs from the project brief |
-| Known tag IDs | `automation` and `internal-work` |
-| Required tags without verified IDs | `meeting-action`, `zoho-ai-generated` |
+| Required verified tags | `automation` (`2543412000001391053`) and `internal-work` (`2543412000001391061`) |
 | Maximum task name length | 250 characters, pending live Zoho verification |
 
 These values are identifiers, not secrets. The builder contains no credentials, tokens, API keys, endpoints, or local machine paths. A configuration with any status other than `In Progress` is rejected.
@@ -53,18 +53,19 @@ Every result is an inert envelope:
   dry_run: true,
   portal_id: "...",
   project_id: "...",
-  status: {name: "In Progress", id: null, verified: false},
+  status: {name: "In Progress", id: "2543412000000031001", verified: true},
   tags: [{name: "automation", id: "..."}, ...],
   task_parameters: {
     name: "Meeting name - Explicit action",
     description: "...",
+    custom_status: "2543412000000031001",
     tagIds: ["known-tag-id", "known-tag-id"],
     person_responsible: "known-owner-id"  // matched owner only
   },
   validation: {
-    ready_for_live: false,
-    missing_status_id: true,
-    missing_tag_ids: [...],
+    ready_for_live: true,
+    missing_status_id: false,
+    missing_tag_ids: [],
     owner_assignment: "matched" | "unassigned"
   }
 }
@@ -72,7 +73,7 @@ Every result is an inert envelope:
 
 The official Projects create-task documentation names `name`, `description`, optional `person_responsible`, and `tagIds` as request parameters. `task_parameters` uses those documented names. The surrounding envelope is an internal dry-run contract, not a request body and not authorization to send anything.
 
-The current create-task documentation does not establish how this project should set its custom `In Progress` status during creation. The builder therefore records the required status intent but leaves its ID null and marks every payload not live-ready. The two required tag names whose IDs are not yet known receive null IDs and are also reported as blockers. Only the two verified tag IDs appear in `task_parameters.tagIds`.
+The builder records the read-only-discovered `In Progress` status ID in both the envelope and `task_parameters.custom_status`. It includes only the two verified existing tag IDs. `meeting-action` and `zoho-ai-generated` are not pilot requirements and do not appear as missing-ID blockers. This makes a structurally complete payload `ready_for_live: true`; it does not bypass the separate two-key execution guard or authorize a live call.
 
 ## Owner Assignment
 

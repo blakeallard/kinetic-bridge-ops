@@ -47,15 +47,32 @@ class ProjectsPayloadBuilderTests(unittest.TestCase):
             self.assertNotIn("person_responsible", payload["task_parameters"])
             self.assertEqual(payload["validation"]["owner_assignment"], "unassigned")
 
-    def test_every_payload_is_in_progress_and_not_live_ready(self) -> None:
+    def test_every_payload_uses_verified_in_progress_and_tags(self) -> None:
         items = load_json(ROOT / "samples/expected/multiple_unknown_summary.json")
         for payload in BUILDER.build_task_payloads(items, meeting_name="Review"):
             self.assertTrue(payload["dry_run"])
             self.assertEqual(
                 payload["status"],
-                {"name": "In Progress", "id": None, "verified": False},
+                {
+                    "name": "In Progress",
+                    "id": "2543412000000031001",
+                    "verified": True,
+                },
             )
-            self.assertFalse(payload["validation"]["ready_for_live"])
+            self.assertTrue(payload["validation"]["ready_for_live"])
+            self.assertFalse(payload["validation"]["missing_status_id"])
+            self.assertEqual(payload["validation"]["missing_tag_ids"], [])
+            self.assertEqual(
+                payload["tags"],
+                [
+                    {"name": "automation", "id": "2543412000001391053"},
+                    {"name": "internal-work", "id": "2543412000001391061"},
+                ],
+            )
+            self.assertEqual(
+                payload["task_parameters"]["custom_status"],
+                "2543412000000031001",
+            )
             description = payload["task_parameters"]["description"]
             for field in BUILDER.WORKFLOW_DIAGNOSTIC_FIELDS:
                 self.assertIn(f"{field}: Not provided", description)

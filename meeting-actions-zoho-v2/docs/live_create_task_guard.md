@@ -63,27 +63,26 @@ Every payload must satisfy all conditions below:
 - `status.id` is present;
 - `status.verified` is true;
 - `task_parameters.custom_status` equals the verified status ID;
-- all four required tag names have IDs;
-- `task_parameters.tagIds` exactly matches those four IDs;
+- the two required pilot tag names have their verified IDs;
+- `task_parameters.tagIds` exactly matches those two IDs;
 - task name and description are present; and
 - portal and project IDs are present and consistent across the batch.
 
 `status.verified: true` is an explicit assertion that both the ID-to-name mapping and create-time status parameter behavior were checked in the target Zoho Projects configuration. Merely discovering a numeric ID is not sufficient.
 
-If any payload fails, the entire batch is rejected before the first client call. Current Stage 4/5 fixtures are expected to fail this preflight.
+If any payload fails, the entire batch is rejected before the first client call. Current payload fixtures satisfy configuration preflight but remain inert unless both live keys are explicitly supplied.
 
-## Configuration Still Missing
+## Verified Pilot Configuration
 
-The committed payload builder currently identifies these blockers:
+The committed payload builder uses:
 
-- verified `In Progress` custom status ID;
-- verified create-time use of that status ID;
-- tag ID for `meeting-action`;
-- tag ID for `zoho-ai-generated`.
+- `In Progress`: `2543412000000031001`;
+- `automation`: `2543412000001391053`;
+- `internal-work`: `2543412000001391061`.
 
-The known `automation` and `internal-work` tag IDs remain configured, but live preflight requires all four. Until the missing IDs and status behavior are verified, payloads remain `ready_for_live: false` and cannot be sent.
+The pilot does not require `meeting-action` or `zoho-ai-generated`, because they do not exist or were not discoverable with the current read-only permissions. Their absence is not a live blocker, and the scaffold does not attempt to create them.
 
-The official Tasks API documents the create endpoint and parameters such as `name`, `description`, `person_responsible`, and `tagIds`. Its current page documents `custom_status` for task updates, while create-time status handling requires target-environment verification. This scaffold therefore requires the verified status ID in both the envelope and `task_parameters` before sending.
+The official Tasks API documents the create endpoint and parameters such as `name`, `description`, `person_responsible`, and `tagIds`. The scaffold requires the verified status ID in both the envelope and `task_parameters` before sending. Actual create-time behavior and task readback remain subjects for a separately authorized live pilot; no live request was made in this update.
 
 ## Client and Transport Boundary
 

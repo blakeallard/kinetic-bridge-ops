@@ -43,8 +43,8 @@ Exit gate: local and Deluge dry-run outputs match for all agreed fixtures, or ev
 Under explicit authorization, inspect configuration without creating tasks:
 
 - confirm portal and project IDs;
-- identify the exact `In Progress` status/status ID;
-- confirm existing tag IDs and create/identify IDs for `meeting-action` and `zoho-ai-generated` only with separate approval;
+- retain the verified `In Progress` status ID `2543412000000031001`;
+- retain the verified `automation` and `internal-work` tag IDs; do not require or create `meeting-action` or `zoho-ai-generated` for the pilot;
 - verify whether a task may be unassigned;
 - verify field lengths and accepted description format;
 - select Creator or Sheet for the registry; and

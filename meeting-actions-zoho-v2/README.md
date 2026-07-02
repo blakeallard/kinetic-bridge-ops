@@ -77,14 +77,14 @@ Each candidate task is expected to have:
 
 - name: `[Meeting] - [Action Text]`;
 - status: `In Progress`;
-- tags: `automation`, `internal-work`, `meeting-action`, and `zoho-ai-generated`;
+- tags: the verified existing tags `automation` and `internal-work`;
 - a known owner, an unassigned owner, or a documented Blake fallback only when assignment is mandatory;
 - no computed due date in the initial version; and
 - a description containing the source type, file identity, meeting identity/date, detected and resolved owner, raw due text, original action text, and Workflow Diagnostic fields set to `Not provided`.
 
 ## Safety Model
 
-Dry-run is the default and must not create a task, task list, registry row, attachment, or any other external object. The guarded live scaffold requires both `--live` and `LIVE_ZOHO_TASK_CREATE=true`, but current payloads remain blocked until the `In Progress` status ID and missing tag IDs are verified. Secrets and local machine paths must never be committed or hardcoded.
+Dry-run is the default and must not create a task, task list, registry row, attachment, or any other external object. The guarded live scaffold requires both `--live` and `LIVE_ZOHO_TASK_CREATE=true`. Payloads use the verified `In Progress` ID `2543412000000031001` and the verified `automation` and `internal-work` tag IDs. Secrets and local machine paths must never be committed or hardcoded.
 
 ## Repository Layout
 

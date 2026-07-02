@@ -20,6 +20,7 @@ from typing import Any, Mapping, Sequence
 PORTAL_ID = "898600220"
 PROJECT_ID = "2543412000001324010"
 STATUS_NAME = "In Progress"
+STATUS_ID = "2543412000000031001"
 DIAGNOSTIC_PLACEHOLDER = "Not provided"
 
 KNOWN_OWNER_IDS: Mapping[str, str] = MappingProxyType(
@@ -40,8 +41,6 @@ KNOWN_TAG_IDS: Mapping[str, str] = MappingProxyType(
 REQUIRED_TAG_NAMES = (
     "automation",
     "internal-work",
-    "meeting-action",
-    "zoho-ai-generated",
 )
 
 WORKFLOW_DIAGNOSTIC_FIELDS = (
@@ -70,6 +69,7 @@ class ProjectsPayloadConfig:
     portal_id: str = PORTAL_ID
     project_id: str = PROJECT_ID
     status_name: str = STATUS_NAME
+    status_id: str = STATUS_ID
     task_name_max_length: int = 250
 
     def validate(self) -> None:
@@ -77,6 +77,8 @@ class ProjectsPayloadConfig:
             raise ValueError("portal_id and project_id are required")
         if self.status_name != STATUS_NAME:
             raise ValueError(f"status_name must remain {STATUS_NAME!r}")
+        if self.status_id != STATUS_ID:
+            raise ValueError("status_id must be the verified In Progress ID")
         if self.task_name_max_length < 1:
             raise ValueError("task_name_max_length must be positive")
 
@@ -198,6 +200,7 @@ def build_task_payload(
     task_parameters: dict[str, Any] = {
         "name": _task_name(meeting_name, action_text, config.task_name_max_length),
         "description": _build_description(item, meeting_name),
+        "custom_status": config.status_id,
         "tagIds": list(KNOWN_TAG_IDS.values()),
     }
     if owner_resolution == "matched":
@@ -213,12 +216,12 @@ def build_task_payload(
         "dry_run": True,
         "portal_id": config.portal_id,
         "project_id": config.project_id,
-        "status": {"name": config.status_name, "id": None, "verified": False},
+        "status": {"name": config.status_name, "id": config.status_id, "verified": True},
         "tags": configured_tags,
         "task_parameters": task_parameters,
         "validation": {
-            "ready_for_live": False,
-            "missing_status_id": True,
+            "ready_for_live": not missing_tag_ids,
+            "missing_status_id": False,
             "missing_tag_ids": missing_tag_ids,
             "owner_assignment": "matched" if owner_resolution == "matched" else "unassigned",
         },

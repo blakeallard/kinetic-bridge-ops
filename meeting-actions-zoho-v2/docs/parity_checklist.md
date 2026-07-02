@@ -26,7 +26,7 @@
 | Meeting date | Uses sibling metadata, special filename patterns, parent folder, or even a hardcoded 2026 fallback | Prefer authoritative WorkDrive/event metadata; never fabricate a date | Replace | Missing-date fixture returns unknown rather than an invented year |
 | Task name | Raw action, truncated to 250 characters | `[Meeting] - [Action Text]`, safely constrained to verified Zoho limits | Replace | Expected payload includes prefix and deterministic safe truncation behavior |
 | Status | No explicit `In Progress` status in create prompt | Every task starts in `In Progress` | Add required behavior | Controlled pilot reads back exact status before rollout |
-| Tags | Adds `automation` and `internal-work` by ID | Add those plus `meeting-action` and `zoho-ai-generated` | Extend | Dry-run names all four; live pilot confirms IDs/readback |
+| Tags | Adds `automation` and `internal-work` by ID | Use those same two verified tags for the pilot; do not block on undiscoverable `meeting-action` or `zoho-ai-generated` tags | Preserve for pilot | Dry-run uses the two verified IDs; live pilot confirms readback |
 | Task list | Creates `Meeting Actions – [date]`, then tasks; may fall back to General | Task-list policy is not specified by v2 requirements | Decision needed | Decide before payload implementation; absence must not weaken task traceability |
 | Description | Basic source date/action/owner or LLM worksheet HTML | Full source, meeting, owner resolution, due text, original text, hashes, and diagnostic review fields | Extend | Snapshot test covers all required fields |
 | Source traceability | Meeting date and original action; no stable WorkDrive file ID/action hash | Include source file ID/name/path, source hash, action hash, meeting name/date | Extend | Reviewer can trace every candidate back to one source bullet |
@@ -53,7 +53,7 @@
 - [ ] Parser fixtures cover all approved headings, boundaries, bullet formats, and negative cases.
 - [ ] Unknown, missing, and multiple-owner behavior is explicit and non-inferential.
 - [ ] Raw due-date text is retained and no relative date is calculated.
-- [ ] Task payloads include `In Progress`, all four tags, and complete source traceability.
+- [ ] Task payloads include the verified `In Progress` ID, the two verified pilot tags, and complete source traceability.
 - [ ] File and action hashes are deterministic across retries.
 - [ ] Partial-failure and zero-action behavior is retry-safe.
 - [ ] Exact Zoho status/tag mappings and unassigned-task support are verified under authorization.

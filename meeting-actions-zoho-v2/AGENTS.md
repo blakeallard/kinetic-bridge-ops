@@ -11,7 +11,7 @@ This repository is the independent Zoho-only v2 meeting-actions pipeline. Build 
 
 ## Current Phase
 
-The current phase includes the local parser, Deluge parser draft, payload builder, in-memory duplicate registry, and guarded create-task scaffold. Do not add Flow/WorkDrive wiring, registry persistence, token refresh, or make a live Zoho call until separately requested. Live creation must remain blocked until the `In Progress` custom status ID and all required tag IDs are verified.
+The current phase includes the local parser, Deluge parser draft, payload builder, in-memory duplicate registry, and guarded create-task scaffold. Do not add Flow/WorkDrive wiring, registry persistence, token refresh, or make a live Zoho call until separately requested. The pilot configuration uses the verified `In Progress` custom status ID and only the verified `automation` and `internal-work` tags. Live execution remains protected by the explicit two-key guard and payload validation.
 
 ## Safety Defaults
 

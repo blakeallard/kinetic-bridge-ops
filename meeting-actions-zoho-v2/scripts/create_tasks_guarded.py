@@ -26,11 +26,10 @@ from typing import Any, Mapping, Protocol, Sequence
 
 LIVE_UNLOCK_ENV = "LIVE_ZOHO_TASK_CREATE"
 REQUIRED_STATUS_NAME = "In Progress"
-REQUIRED_TAG_NAMES = {
-    "automation",
-    "internal-work",
-    "meeting-action",
-    "zoho-ai-generated",
+REQUIRED_STATUS_ID = "2543412000000031001"
+REQUIRED_TAGS = {
+    "automation": "2543412000001391053",
+    "internal-work": "2543412000001391061",
 }
 
 
@@ -236,6 +235,8 @@ def _payload_live_errors(payload: Mapping[str, Any]) -> list[str]:
             errors.append("status.id must be a verified numeric ID")
         else:
             status_id = status["id"].strip()
+            if status_id != REQUIRED_STATUS_ID:
+                errors.append("status.id must equal the verified In Progress ID")
         if status.get("verified") is not True:
             errors.append("status.verified must be true")
 
@@ -257,8 +258,14 @@ def _payload_live_errors(payload: Mapping[str, Any]) -> list[str]:
                 errors.append(f"tag ID is missing for {tag_name!r}")
             else:
                 verified_tag_ids.append(tag_id.strip())
-        if tag_names != REQUIRED_TAG_NAMES:
-            errors.append("tags must contain exactly the four required tag names")
+        if tag_names != set(REQUIRED_TAGS):
+            errors.append("tags must contain exactly the two verified tag names")
+        if {
+            tag.get("name"): tag.get("id")
+            for tag in tags
+            if isinstance(tag, Mapping)
+        } != REQUIRED_TAGS:
+            errors.append("tags must use the verified tag IDs")
 
     task_parameters = payload.get("task_parameters")
     if not isinstance(task_parameters, Mapping):
@@ -277,7 +284,7 @@ def _payload_live_errors(payload: Mapping[str, Any]) -> list[str]:
         ):
             errors.append("task_parameters.tagIds must contain non-empty IDs")
         elif set(task_tag_ids) != set(verified_tag_ids):
-            errors.append("task_parameters.tagIds must match the four verified tag IDs")
+            errors.append("task_parameters.tagIds must match the two verified tag IDs")
 
     if not _numeric_id(payload.get("portal_id")):
         errors.append("portal_id must be a numeric ID")

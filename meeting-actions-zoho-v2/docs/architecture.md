@@ -112,7 +112,7 @@ The normalized internal candidate should include at least:
 | `owner_resolution` | `matched`, `unassigned`, or `fallback` |
 | `due_date_raw` | Exact detected text or empty |
 | `due_date` | Unset in the initial version |
-| `tags` | `automation`, `internal-work`, `meeting-action`, `zoho-ai-generated` |
+| `tags` | Verified existing tags `automation` and `internal-work` |
 | `source_file_id` | Stable WorkDrive file ID |
 | `source_file_name` | Display and audit value |
 | `source_hash` | Hash of normalized source content |
@@ -122,7 +122,7 @@ The normalized internal candidate should include at least:
 
 The description must render the source type (`Zoho AI meeting summary`), summary file identity, meeting name/date, owner detection/resolution, raw due text, original action text, file/action hashes, and Workflow Diagnostic fields. The diagnostic fields carried forward from v1 are requested task, business problem, how the workflow should work, success criteria, current status, problem type, systems involved, data needed, access/approval needed, information moving between systems, one-sentence diagnosis, and next action. The initial no-LLM version does not invent answers for these fields; each remains visibly `Not provided` for a human.
 
-Portal `898600220`, project `2543412000001324010`, the known owner IDs, and known tag IDs are configuration values. They are not secrets, but should not be scattered through implementation code. IDs for the two new required tags and the exact `In Progress` status value must be discovered and validated before live mode.
+Portal `898600220`, project `2543412000001324010`, the known owner IDs, verified tag IDs, and verified `In Progress` status ID are configuration values. They are not secrets, but should not be scattered through implementation code. The pilot deliberately does not require `meeting-action` or `zoho-ai-generated` because those tags do not exist or cannot be discovered with current read-only permissions.
 
 ### 5. Idempotency and registry
 

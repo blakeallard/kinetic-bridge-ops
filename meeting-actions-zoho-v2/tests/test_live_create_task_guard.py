@@ -38,12 +38,10 @@ def registry_report(payloads):
 
 def live_ready_payload():
     payload = load_json(ROOT / "samples/payloads/known_owner_payload.json")
-    status_id = "2543412000001999001"
+    status_id = "2543412000000031001"
     tag_ids = {
         "automation": "2543412000001391053",
         "internal-work": "2543412000001391061",
-        "meeting-action": "2543412000001999002",
-        "zoho-ai-generated": "2543412000001999003",
     }
     payload["status"] = {
         "name": "In Progress",
@@ -128,6 +126,7 @@ class LiveCreateTaskGuardTests(unittest.TestCase):
         mutations = (
             ("missing status flag", lambda payload: payload["validation"].update(missing_status_id=True)),
             ("missing status ID", lambda payload: payload["status"].update(id=None)),
+            ("wrong status ID", lambda payload: payload["status"].update(id="2543412000001999001")),
             ("unverified status", lambda payload: payload["status"].update(verified=False)),
             (
                 "missing custom status parameter",
@@ -136,7 +135,7 @@ class LiveCreateTaskGuardTests(unittest.TestCase):
             (
                 "missing tag IDs",
                 lambda payload: payload["validation"].update(
-                    missing_tag_ids=["zoho-ai-generated"]
+                    missing_tag_ids=["automation"]
                 ),
             ),
         )
@@ -183,7 +182,7 @@ class LiveCreateTaskGuardTests(unittest.TestCase):
     def test_entire_batch_is_validated_before_first_client_call(self) -> None:
         client = FakeTaskCreateClient()
         blocked = live_ready_payload()
-        blocked["validation"]["missing_tag_ids"] = ["zoho-ai-generated"]
+        blocked["validation"]["missing_tag_ids"] = ["automation"]
         with self.assertRaises(guarded.PayloadValidationError):
             guarded.execute_registry_report(
                 registry_report([live_ready_payload(), blocked]),
