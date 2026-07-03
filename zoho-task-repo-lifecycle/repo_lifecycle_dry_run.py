@@ -76,6 +76,39 @@ class Decision:
     missing_metadata: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ZohoReadResult:
+    env: dict[str, str]
+    env_names: set[str]
+    findings: list[tuple[str, str]]
+    total_tasks: int = 0
+    tagged_tasks: list[dict[str, Any]] = field(default_factory=list)
+    untagged_count: int = 0
+    token: str | None = None
+    comments_checked: int = 0
+
+
+@dataclass
+class GitHubReadResult:
+    findings: list[tuple[str, str]]
+    state: str
+    github_checks: int = 0
+
+
+@dataclass
+class MappingReadResult:
+    entries: list[dict[str, str]]
+    findings: list[tuple[str, str]]
+
+
+@dataclass
+class DecisionGroups:
+    would_create: list[Decision]
+    existing: list[Decision]
+    blocked: list[Decision]
+    missing_metadata: list[Decision]
+
+
 class Report:
     def __init__(self, mode: str = "dry-run") -> None:
         self.timestamp = datetime.now().astimezone()
@@ -425,6 +458,18 @@ def parse_args() -> argparse.Namespace:
         help="Second explicit confirmation token; must exactly match --task-key",
     )
     return parser.parse_args()
+
+
+def validate_apply_gate(args: argparse.Namespace) -> str:
+    if not args.apply:
+        return ""
+    if not args.task_key:
+        return "apply mode requires --task-key"
+    if args.task_key.upper() != APPLY_TASK_KEY:
+        return f"apply allowlist permits only {APPLY_TASK_KEY}"
+    if args.confirm_apply != args.task_key:
+        return f"apply mode requires --confirm-apply {args.task_key}"
+    return ""
 
 
 def named_value(value: Any) -> str:
@@ -845,202 +890,270 @@ def write_report(report: Report) -> Path:
     return path
 
 
-def main() -> int:
-    args = parse_args()
-    install_tls_context()
-    report = Report(mode="apply" if args.apply else "dry-run")
-    decisions: list[Decision] = []
-    zoho_findings: list[tuple[str, str]] = []
-    github_findings: list[tuple[str, str]] = []
-    mapping_findings: list[tuple[str, str]] = []
-    total_tasks = 0
-    tagged_tasks: list[dict[str, Any]] = []
-    untagged_count = 0
-    comments_checked = 0
-    github_checks = 0
-    token: str | None = None
-    apply_gate_error = ""
-
-    if args.apply:
-        if not args.task_key:
-            apply_gate_error = "apply mode requires --task-key"
-        elif args.task_key.upper() != APPLY_TASK_KEY:
-            apply_gate_error = f"apply allowlist permits only {APPLY_TASK_KEY}"
-        elif args.confirm_apply != args.task_key:
-            apply_gate_error = f"apply mode requires --confirm-apply {args.task_key}"
-
+def load_zoho_read_result() -> ZohoReadResult:
+    findings: list[tuple[str, str]] = []
     try:
         env, env_names = load_env_file(SOURCE_ENV_FILE)
     except OSError as exc:
-        zoho_findings.append(("ERROR", f"could not read source env file: {exc}"))
+        findings.append(("ERROR", f"could not read source env file: {exc}"))
         env = {}
         env_names = set()
-    zoho_findings.append(("INFO", f"source env variable names present: {', '.join(sorted(env_names)) or 'none'}; values not printed"))
+    findings.append(
+        (
+            "INFO",
+            f"source env variable names present: {', '.join(sorted(env_names)) or 'none'}; values not printed",
+        )
+    )
     missing_env = sorted(name for name in REQUIRED_ENV_NAMES if not env.get(name))
     if missing_env:
-        zoho_findings.append(("ERROR", f"missing required env variable names or values: {', '.join(missing_env)}"))
-    else:
-        try:
-            token = cached_access_token()
-            token_source = "existing status-poller cache" if token else "OAuth refresh response held in memory only"
-            if token is None:
-                token = refresh_access_token(env)
-            tasks = fetch_tasks(env, token)
-            total_tasks = len(tasks)
-            tagged_tasks = [task for task in tasks if APPROVAL_TAG in extract_tags(task)]
-            untagged_count = total_tasks - len(tagged_tasks)
-            zoho_findings.append(("SUCCESS", f"Zoho read succeeded using {token_source}; {total_tasks} task(s) returned"))
-        except RuntimeError as exc:
-            zoho_findings.append(("ERROR", str(exc)))
+        findings.append(
+            ("ERROR", f"missing required env variable names or values: {', '.join(missing_env)}")
+        )
+        return ZohoReadResult(env=env, env_names=env_names, findings=findings)
 
+    try:
+        token = cached_access_token()
+        token_source = "existing status-poller cache" if token else "OAuth refresh response held in memory only"
+        if token is None:
+            token = refresh_access_token(env)
+        tasks = fetch_tasks(env, token)
+        total_tasks = len(tasks)
+        tagged_tasks = [task for task in tasks if APPROVAL_TAG in extract_tags(task)]
+        untagged_count = total_tasks - len(tagged_tasks)
+        findings.append(
+            ("SUCCESS", f"Zoho read succeeded using {token_source}; {total_tasks} task(s) returned")
+        )
+        return ZohoReadResult(
+            env=env,
+            env_names=env_names,
+            findings=findings,
+            total_tasks=total_tasks,
+            tagged_tasks=tagged_tasks,
+            untagged_count=untagged_count,
+            token=token,
+        )
+    except RuntimeError as exc:
+        findings.append(("ERROR", str(exc)))
+        return ZohoReadResult(env=env, env_names=env_names, findings=findings)
+
+
+def load_github_read_result() -> GitHubReadResult:
     gh_state, gh_reason = github_auth_state()
     gh_label = "SUCCESS" if gh_state == "ready" else ("SKIPPED" if gh_state == "unavailable" else "BLOCKED")
-    github_findings.append((gh_label, gh_reason))
+    return GitHubReadResult(findings=[(gh_label, gh_reason)], state=gh_state)
 
+
+def load_mapping_read_result() -> MappingReadResult:
+    findings: list[tuple[str, str]] = []
     try:
         mappings, mapping_sources = mapping_entries()
         if mapping_sources:
-            mapping_findings.append(("INFO", f"loaded mapping evidence from: {', '.join(str(path) for path in mapping_sources)}"))
+            findings.append(
+                (
+                    "INFO",
+                    f"loaded mapping evidence from: {', '.join(str(path) for path in mapping_sources)}",
+                )
+            )
         else:
-            mapping_findings.append(("INFO", "no task_repo_map.json exists in the approved candidate locations"))
+            findings.append(("INFO", "no task_repo_map.json exists in the approved candidate locations"))
+        return MappingReadResult(entries=mappings, findings=findings)
     except RuntimeError as exc:
-        mappings = []
-        mapping_findings.append(("BLOCKED", str(exc)))
-    local_repos = local_repo_index()
+        findings.append(("BLOCKED", str(exc)))
+        return MappingReadResult(entries=[], findings=findings)
 
-    for task in tagged_tasks:
-        task_id = str(task.get("id") or task.get("id_string") or "").strip()
-        task_key = extract_task_key(task)
-        title = str(task.get("name") or task.get("title") or "").strip()
-        missing: list[str] = []
-        if not re.fullmatch(r"BI1-T\d+", task_key):
-            missing.append("valid task key")
-        if not title or title.lower() == "untitled zoho task":
-            missing.append("title")
-        if not task_id or not task_id.isdigit():
-            missing.append("immutable Zoho task ID")
-        repo_name = expected_repo_name(task_key, title) if not missing else ""
-        if missing:
-            decisions.append(
-                Decision(
-                    task_id=task_id,
-                    task_key=task_key,
-                    title=title,
-                    repo_name=repo_name,
-                    action="blocked",
-                    reason="missing required metadata",
-                    missing_metadata=missing,
-                )
-            )
-            continue
 
-        evidence: list[str] = []
-        conflicts: list[str] = []
-        local = local_repos.get(repo_name.lower())
-        if local:
-            evidence.append(f"local path {local}")
+def evaluate_task_decision(
+    task: dict[str, Any],
+    mappings: list[dict[str, str]],
+    local_repos: dict[str, Path],
+    github_state: str,
+    env: dict[str, str],
+    token: str | None,
+) -> tuple[Decision, int]:
+    task_id = str(task.get("id") or task.get("id_string") or "").strip()
+    task_key = extract_task_key(task)
+    title = str(task.get("name") or task.get("title") or "").strip()
+    missing: list[str] = []
+    if not re.fullmatch(r"BI1-T\d+", task_key):
+        missing.append("valid task key")
+    if not title or title.lower() == "untitled zoho task":
+        missing.append("title")
+    if not task_id or not task_id.isdigit():
+        missing.append("immutable Zoho task ID")
+    repo_name = expected_repo_name(task_key, title) if not missing else ""
+    if missing:
+        return (
+            Decision(
+                task_id=task_id,
+                task_key=task_key,
+                title=title,
+                repo_name=repo_name,
+                action="blocked",
+                reason="missing required metadata",
+                missing_metadata=missing,
+            ),
+            0,
+        )
 
-        mapped, mapping_conflicts = mapping_evidence(mappings, task_id, task_key, repo_name)
-        evidence.extend(mapped)
-        conflicts.extend(mapping_conflicts)
+    evidence: list[str] = []
+    conflicts: list[str] = []
+    local = local_repos.get(repo_name.lower())
+    if local:
+        evidence.append(f"local path {local}")
 
-        text_sources = [str(task.get("description") or "")]
-        try:
-            comments = fetch_comments(env, token, task_id)
-            comments_checked += 1
-            text_sources.extend(str(comment.get("content") or "") for comment in comments)
-        except RuntimeError as exc:
-            decisions.append(
-                Decision(
-                    task_id=task_id,
-                    task_key=task_key,
-                    title=title,
-                    repo_name=repo_name,
-                    action="blocked",
-                    reason=f"Zoho comments could not be checked: {exc}",
-                )
-            )
-            continue
-        zoho_urls = [url for text in text_sources for url in github_urls_from_text(text)]
-        for org, found_repo, url in zoho_urls:
-            if org.lower() == GITHUB_ORG.lower() and found_repo.lower() == repo_name.lower():
-                evidence.append(f"Zoho task repository URL {url}")
-            else:
-                conflicts.append(f"Zoho task references {url}")
+    mapped, mapping_conflicts = mapping_evidence(mappings, task_id, task_key, repo_name)
+    evidence.extend(mapped)
+    conflicts.extend(mapping_conflicts)
 
-        if gh_state == "ready":
-            repo_state, repo_reason = github_repo_state(repo_name)
-            github_checks += 1
-            if repo_state == "exists":
-                evidence.append(repo_reason)
-            elif repo_state == "blocked":
-                decisions.append(
-                    Decision(
-                        task_id=task_id,
-                        task_key=task_key,
-                        title=title,
-                        repo_name=repo_name,
-                        action="blocked",
-                        reason=repo_reason,
-                    )
-                )
-                continue
-        elif gh_state == "blocked":
-            decisions.append(
-                Decision(
-                    task_id=task_id,
-                    task_key=task_key,
-                    title=title,
-                    repo_name=repo_name,
-                    action="blocked",
-                    reason="GitHub existence check could not run",
-                )
-            )
-            continue
-
-        if conflicts:
-            decisions.append(
-                Decision(
-                    task_id=task_id,
-                    task_key=task_key,
-                    title=title,
-                    repo_name=repo_name,
-                    action="blocked",
-                    reason="; ".join(conflicts),
-                )
-            )
-        elif evidence:
-            decisions.append(
-                Decision(
-                    task_id=task_id,
-                    task_key=task_key,
-                    title=title,
-                    repo_name=repo_name,
-                    action="existing",
-                    reason="; ".join(evidence),
-                )
-            )
+    text_sources = [str(task.get("description") or "")]
+    try:
+        comments = fetch_comments(env, token, task_id)
+        text_sources.extend(str(comment.get("content") or "") for comment in comments)
+    except RuntimeError as exc:
+        return (
+            Decision(
+                task_id=task_id,
+                task_key=task_key,
+                title=title,
+                repo_name=repo_name,
+                action="blocked",
+                reason=f"Zoho comments could not be checked: {exc}",
+            ),
+            0,
+        )
+    zoho_urls = [url for text in text_sources for url in github_urls_from_text(text)]
+    for org, found_repo, url in zoho_urls:
+        if org.lower() == GITHUB_ORG.lower() and found_repo.lower() == repo_name.lower():
+            evidence.append(f"Zoho task repository URL {url}")
         else:
-            decisions.append(
+            conflicts.append(f"Zoho task references {url}")
+
+    if github_state == "ready":
+        repo_state, repo_reason = github_repo_state(repo_name)
+        if repo_state == "exists":
+            evidence.append(repo_reason)
+        elif repo_state == "blocked":
+            return (
                 Decision(
                     task_id=task_id,
                     task_key=task_key,
                     title=title,
                     repo_name=repo_name,
-                    action="would-create",
-                    reason="all available duplicate checks are clear",
-                )
+                    action="blocked",
+                    reason=repo_reason,
+                ),
+                1,
             )
+        github_checks = 1
+    elif github_state == "blocked":
+        return (
+            Decision(
+                task_id=task_id,
+                task_key=task_key,
+                title=title,
+                repo_name=repo_name,
+                action="blocked",
+                reason="GitHub existence check could not run",
+            ),
+            0,
+        )
+    else:
+        github_checks = 0
 
+    if conflicts:
+        return (
+            Decision(
+                task_id=task_id,
+                task_key=task_key,
+                title=title,
+                repo_name=repo_name,
+                action="blocked",
+                reason="; ".join(conflicts),
+            ),
+            github_checks,
+        )
+    if evidence:
+        return (
+            Decision(
+                task_id=task_id,
+                task_key=task_key,
+                title=title,
+                repo_name=repo_name,
+                action="existing",
+                reason="; ".join(evidence),
+            ),
+            github_checks,
+        )
+    return (
+        Decision(
+            task_id=task_id,
+            task_key=task_key,
+            title=title,
+            repo_name=repo_name,
+            action="would-create",
+            reason="all available duplicate checks are clear",
+        ),
+        github_checks,
+    )
+
+
+def build_decisions(
+    tagged_tasks: list[dict[str, Any]],
+    mappings: list[dict[str, str]],
+    local_repos: dict[str, Path],
+    github_state: str,
+    env: dict[str, str],
+    token: str | None,
+) -> tuple[list[Decision], int, int]:
+    decisions: list[Decision] = []
+    comments_checked = 0
+    github_checks = 0
+    for task in tagged_tasks:
+        decision, task_github_checks = evaluate_task_decision(
+            task=task,
+            mappings=mappings,
+            local_repos=local_repos,
+            github_state=github_state,
+            env=env,
+            token=token,
+        )
+        decisions.append(decision)
+        github_checks += task_github_checks
+        if not decision.reason.startswith("Zoho comments could not be checked:"):
+            comments_checked += 1
+    return decisions, comments_checked, github_checks
+
+
+def group_decisions(decisions: list[Decision]) -> DecisionGroups:
     would_create = [decision for decision in decisions if decision.action == "would-create"]
     existing = [decision for decision in decisions if decision.action == "existing"]
     blocked = [decision for decision in decisions if decision.action == "blocked"]
     missing_metadata = [decision for decision in blocked if decision.missing_metadata]
+    return DecisionGroups(
+        would_create=would_create,
+        existing=existing,
+        blocked=blocked,
+        missing_metadata=missing_metadata,
+    )
 
+
+def add_summary_sections(
+    report: Report,
+    *,
+    total_tasks: int,
+    tagged_tasks: list[dict[str, Any]],
+    untagged_count: int,
+    decision_groups: DecisionGroups,
+    mapping_findings: list[tuple[str, str]],
+) -> None:
     report.add("INFO", "A. Summary counts", f"total Zoho tasks: {total_tasks}")
     report.add("INFO", "A. Summary counts", f"tagged repo-needed: {len(tagged_tasks)}")
     report.add("INFO", "A. Summary counts", f"untagged skipped: {untagged_count}")
-    report.add("INFO", "A. Summary counts", f"would create: {len(would_create)}; existing or mapped: {len(existing)}; blocked: {len(blocked)}; missing metadata: {len(missing_metadata)}")
+    report.add(
+        "INFO",
+        "A. Summary counts",
+        f"would create: {len(decision_groups.would_create)}; existing or mapped: {len(decision_groups.existing)}; blocked: {len(decision_groups.blocked)}; missing metadata: {len(decision_groups.missing_metadata)}",
+    )
 
     if tagged_tasks:
         for task in tagged_tasks:
@@ -1050,88 +1163,206 @@ def main() -> int:
     else:
         report.add("INFO", "B. Tagged repo-needed tasks found", "no tasks carry the exact repo-needed tag")
 
-    report.add("SKIPPED", "C. Skipped untagged task count", f"{untagged_count} task(s) skipped because the exact repo-needed tag is absent")
+    report.add(
+        "SKIPPED",
+        "C. Skipped untagged task count",
+        f"{untagged_count} task(s) skipped because the exact repo-needed tag is absent",
+    )
 
-    if would_create:
-        for decision in would_create:
-            report.add("INFO", "D. Would-create repositories", f"would create private repo {GITHUB_ORG}/{decision.repo_name} for {decision.task_key}; dry-run performed no write")
+    if decision_groups.would_create:
+        for decision in decision_groups.would_create:
+            report.add(
+                "INFO",
+                "D. Would-create repositories",
+                f"would create private repo {GITHUB_ORG}/{decision.repo_name} for {decision.task_key}; dry-run performed no write",
+            )
     else:
         report.add("INFO", "D. Would-create repositories", "no repositories would be created by this run")
 
-    if existing:
+    if decision_groups.existing:
         for label, message in mapping_findings:
             report.add(label, "E. Existing or mapped repositories", message)
-        for decision in existing:
-            report.add("SKIPPED", "E. Existing or mapped repositories", f"{decision.task_key} {decision.repo_name}: repo already exists or is mapped; {decision.reason}")
+        for decision in decision_groups.existing:
+            report.add(
+                "SKIPPED",
+                "E. Existing or mapped repositories",
+                f"{decision.task_key} {decision.repo_name}: repo already exists or is mapped; {decision.reason}",
+            )
     else:
         for label, message in mapping_findings:
             report.add(label, "E. Existing or mapped repositories", message)
-        report.add("INFO", "E. Existing or mapped repositories", "no tagged task resolved to existing or mapped repository evidence")
+        report.add(
+            "INFO",
+            "E. Existing or mapped repositories",
+            "no tagged task resolved to existing or mapped repository evidence",
+        )
 
-    if blocked:
-        for decision in blocked:
+    if decision_groups.blocked:
+        for decision in decision_groups.blocked:
             identity = decision.task_key or decision.task_id or "unknown-task"
             report.add("BLOCKED", "F. Blocked tasks", f"{identity}: {decision.reason}")
     else:
         report.add("SUCCESS", "F. Blocked tasks", "no tagged tasks are blocked")
 
-    if missing_metadata:
-        for decision in missing_metadata:
+    if decision_groups.missing_metadata:
+        for decision in decision_groups.missing_metadata:
             identity = decision.task_key or decision.task_id or "unknown-task"
             report.add("BLOCKED", "G. Missing metadata", f"{identity} missing: {', '.join(decision.missing_metadata)}")
     else:
-        report.add("SUCCESS", "G. Missing metadata", "no tagged tasks are missing required key, title, or immutable ID")
+        report.add(
+            "SUCCESS",
+            "G. Missing metadata",
+            "no tagged tasks are missing required key, title, or immutable ID",
+        )
 
+
+def add_integration_sections(
+    report: Report,
+    *,
+    args: argparse.Namespace,
+    github_findings: list[tuple[str, str]],
+    github_checks: int,
+    zoho_findings: list[tuple[str, str]],
+    total_tasks: int,
+    comments_checked: int,
+) -> None:
     for label, message in github_findings:
         report.add(label, "H. GitHub read-only check result", message)
     github_mode_note = "dry-run used no GitHub write commands" if not args.apply else "apply writes remain confirmation-gated"
-    report.add("INFO", "H. GitHub read-only check result", f"GitHub organization: {GITHUB_ORG}; repo view checks executed: {github_checks}; {github_mode_note}")
+    report.add(
+        "INFO",
+        "H. GitHub read-only check result",
+        f"GitHub organization: {GITHUB_ORG}; repo view checks executed: {github_checks}; {github_mode_note}",
+    )
+
     for label, message in zoho_findings:
         report.add(label, "I. Zoho read-only check result", message)
     zoho_mode_note = "no task updates or comments were written" if not args.apply else "write-back remains confirmation-gated"
-    report.add("INFO", "I. Zoho read-only check result", f"task-list reads: {1 if total_tasks else 0}; tagged-task comment reads: {comments_checked}; {zoho_mode_note}")
+    report.add(
+        "INFO",
+        "I. Zoho read-only check result",
+        f"task-list reads: {1 if total_tasks else 0}; tagged-task comment reads: {comments_checked}; {zoho_mode_note}",
+    )
+
+
+def execute_apply_mode(
+    report: Report,
+    *,
+    args: argparse.Namespace,
+    apply_gate_error: str,
+    token: str | None,
+    tagged_tasks: list[dict[str, Any]],
+    decisions: list[Decision],
+    env: dict[str, str],
+) -> None:
+    report.add(
+        "INFO",
+        "J. Apply safety",
+        f"apply mode is hard-limited to {APPLY_TASK_KEY} and requires matching --task-key and --confirm-apply values",
+    )
+    if apply_gate_error:
+        report.add("BLOCKED", "K. Apply execution", apply_gate_error)
+        return
+    if token is None:
+        report.add(
+            "BLOCKED",
+            "K. Apply execution",
+            "Zoho authentication/read preflight did not produce a usable access token",
+        )
+        return
+
+    selected_task = next(
+        (task for task in tagged_tasks if extract_task_key(task) == args.task_key.upper()),
+        None,
+    )
+    selected_decision = next(
+        (decision for decision in decisions if decision.task_key == args.task_key.upper()),
+        None,
+    )
+    if selected_task is None:
+        report.add("BLOCKED", "K. Apply execution", f"{args.task_key} is not currently tagged {APPROVAL_TAG}")
+        return
+    if selected_decision is None:
+        report.add("BLOCKED", "K. Apply execution", f"no dry-run decision exists for {args.task_key}")
+        return
+    if selected_decision.action == "blocked":
+        report.add(
+            "BLOCKED",
+            "K. Apply execution",
+            f"dry-run preflight is blocked: {selected_decision.reason}",
+        )
+        return
+
+    local_path = LOCAL_REPO_ROOT / selected_decision.repo_name
+    plan_messages = (
+        f"apply plan: create or verify local path {local_path}",
+        f"apply plan: create or verify private GitHub repo {GITHUB_ORG}/{selected_decision.repo_name}",
+        "apply plan: generate starter files, commit, push, atomically map, then idempotently comment on the Zoho task",
+        "shared CLAUDE.md and AGENTS.md template reuse is deferred; safe starter templates will be generated",
+    )
+    for index, message in enumerate(plan_messages):
+        label = "WARN" if index == 3 else "INFO"
+        report.add(label, "K. Apply plan", message)
+        print(f"[{label}] {message}")
+    print(f"[INFO] explicit apply confirmation accepted for {args.task_key}")
+    try:
+        apply_one_task(report, env, token, selected_task, selected_decision)
+        report.add("SUCCESS", "K. Apply execution", f"controlled apply completed for {args.task_key}")
+    except ApplyBlocked as exc:
+        report.add("BLOCKED", "K. Apply execution", str(exc))
+
+
+def main() -> int:
+    args = parse_args()
+    install_tls_context()
+    report = Report(mode="apply" if args.apply else "dry-run")
+    apply_gate_error = validate_apply_gate(args)
+
+    zoho_result = load_zoho_read_result()
+    github_result = load_github_read_result()
+    mapping_result = load_mapping_read_result()
+    local_repos = local_repo_index()
+
+    decisions, comments_checked, github_checks = build_decisions(
+        tagged_tasks=zoho_result.tagged_tasks,
+        mappings=mapping_result.entries,
+        local_repos=local_repos,
+        github_state=github_result.state,
+        env=zoho_result.env,
+        token=zoho_result.token,
+    )
+    decision_groups = group_decisions(decisions)
+
+    add_summary_sections(
+        report,
+        total_tasks=zoho_result.total_tasks,
+        tagged_tasks=zoho_result.tagged_tasks,
+        untagged_count=zoho_result.untagged_count,
+        decision_groups=decision_groups,
+        mapping_findings=mapping_result.findings,
+    )
+    add_integration_sections(
+        report,
+        args=args,
+        github_findings=github_result.findings,
+        github_checks=github_checks,
+        zoho_findings=zoho_result.findings,
+        total_tasks=zoho_result.total_tasks,
+        comments_checked=comments_checked,
+    )
     if not args.apply:
         report.add("INFO", "J. No-write confirmation", "dry-run mode executed no GitHub create, Git push, Zoho write-back, repository initialization, scheduler edit, or service-control action")
         report.add("SUCCESS", "J. No-write confirmation", "no GitHub repositories, commits, pushes, Zoho comments, Zoho task updates, local repositories, mappings, or scheduler changes were created")
     else:
-        report.add("INFO", "J. Apply safety", f"apply mode is hard-limited to {APPLY_TASK_KEY} and requires matching --task-key and --confirm-apply values")
-        if apply_gate_error:
-            report.add("BLOCKED", "K. Apply execution", apply_gate_error)
-        elif token is None:
-            report.add("BLOCKED", "K. Apply execution", "Zoho authentication/read preflight did not produce a usable access token")
-        else:
-            selected_task = next(
-                (task for task in tagged_tasks if extract_task_key(task) == args.task_key.upper()),
-                None,
-            )
-            selected_decision = next(
-                (decision for decision in decisions if decision.task_key == args.task_key.upper()),
-                None,
-            )
-            if selected_task is None:
-                report.add("BLOCKED", "K. Apply execution", f"{args.task_key} is not currently tagged {APPROVAL_TAG}")
-            elif selected_decision is None:
-                report.add("BLOCKED", "K. Apply execution", f"no dry-run decision exists for {args.task_key}")
-            elif selected_decision.action == "blocked":
-                report.add("BLOCKED", "K. Apply execution", f"dry-run preflight is blocked: {selected_decision.reason}")
-            else:
-                local_path = LOCAL_REPO_ROOT / selected_decision.repo_name
-                plan_messages = (
-                    f"apply plan: create or verify local path {local_path}",
-                    f"apply plan: create or verify private GitHub repo {GITHUB_ORG}/{selected_decision.repo_name}",
-                    "apply plan: generate starter files, commit, push, atomically map, then idempotently comment on the Zoho task",
-                    "shared CLAUDE.md and AGENTS.md template reuse is deferred; safe starter templates will be generated",
-                )
-                for index, message in enumerate(plan_messages):
-                    label = "WARN" if index == 3 else "INFO"
-                    report.add(label, "K. Apply plan", message)
-                    print(f"[{label}] {message}")
-                print(f"[INFO] explicit apply confirmation accepted for {args.task_key}")
-                try:
-                    apply_one_task(report, env, token, selected_task, selected_decision)
-                    report.add("SUCCESS", "K. Apply execution", f"controlled apply completed for {args.task_key}")
-                except ApplyBlocked as exc:
-                    report.add("BLOCKED", "K. Apply execution", str(exc))
+        execute_apply_mode(
+            report,
+            args=args,
+            apply_gate_error=apply_gate_error,
+            token=zoho_result.token,
+            tagged_tasks=zoho_result.tagged_tasks,
+            decisions=decisions,
+            env=zoho_result.env,
+        )
 
     try:
         report_path = write_report(report)
