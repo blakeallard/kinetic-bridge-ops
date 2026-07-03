@@ -72,6 +72,16 @@ PROJECT_STATUS_OPTIONS = {
     "Blocker": "ba2eeecb",
     "Closed": "e7c555c4",
 }
+REQUIRED_COORDINATION_FILES = (
+    "README.md",
+    "TASK.md",
+    "STATUS.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CODEX.md",
+    ".github/ISSUE_TEMPLATE/zoho-task.md",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+)
 
 
 @dataclass
@@ -1163,6 +1173,15 @@ def classify_existing_apply_state(task: dict[str, Any], decision: Decision) -> s
     return "resume"
 
 
+def verify_existing_repo_files(local_path: Path) -> None:
+    missing = [relative_name for relative_name in REQUIRED_COORDINATION_FILES if not (local_path / relative_name).is_file()]
+    if missing:
+        raise ApplyBlocked(
+            "existing repository is missing required AI coordination files: "
+            + ", ".join(missing)
+        )
+
+
 def ensure_local_files(local_path: Path, task: dict[str, Any], decision: Decision, repo_url: str) -> None:
     if local_path.exists() and (local_path.is_symlink() or not local_path.is_dir()):
         raise ApplyBlocked(f"refusing unsafe local repository path: {local_path}")
@@ -1517,16 +1536,18 @@ def apply_one_task(
         raise ApplyBlocked(f"task no longer has exact tag {APPROVAL_TAG}")
     if decision.action == "blocked":
         raise ApplyBlocked(f"dry-run eligibility is blocked: {decision.reason}")
-    if decision.action == "existing":
-        classify_existing_apply_state(task, decision)
-        report.add("WARN", "M. Apply execution", "verified partial existing state; continuing idempotent resume")
-    elif decision.action != "would-create":
-        raise ApplyBlocked(f"unsupported apply decision: {decision.action}")
-
     local_path = LOCAL_REPO_ROOT / decision.repo_name
     provisional_url = f"https://github.com/{GITHUB_ORG}/{decision.repo_name}"
-    ensure_local_files(local_path, task, decision, provisional_url)
-    report.add("SUCCESS", "M. Apply execution", f"local starter files verified at {local_path}")
+    if decision.action == "existing":
+        classify_existing_apply_state(task, decision)
+        verify_existing_repo_files(local_path)
+        report.add("WARN", "M. Apply execution", "verified partial existing state; continuing idempotent resume")
+        report.add("SUCCESS", "M. Apply execution", f"existing coordination files verified at {local_path}")
+    elif decision.action != "would-create":
+        raise ApplyBlocked(f"unsupported apply decision: {decision.action}")
+    else:
+        ensure_local_files(local_path, task, decision, provisional_url)
+        report.add("SUCCESS", "M. Apply execution", f"local starter files verified at {local_path}")
     ensure_git_repository(local_path)
     report.add("SUCCESS", "M. Apply execution", "local Git repository initialized or verified on main")
     repo_url = ensure_github_repository(decision.repo_name)
