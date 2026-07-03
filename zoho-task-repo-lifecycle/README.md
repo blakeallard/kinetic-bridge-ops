@@ -59,3 +59,11 @@ Tasks without the exact `repo-needed` tag are counted and skipped without per-ta
 - Secrets and full environment values are never printed.
 - The expected GitHub organization defaults to `blake-bevco-tech` and can be overridden with `GITHUB_ORG` for a future Kinetic Bridge organization.
 - Generated reports, local `.env`, runtime mapping state, and Python caches are ignored by Git.
+
+## task_repo_map.json
+
+- `task_repo_map.json` is intentionally ignored by Git.
+- It is local runtime state for this automation.
+- It stores task-to-repo, task-to-issue, and task-to-project mappings along with local filesystem paths used for reconciliation.
+- It should not be committed unless this project intentionally changes its state-management policy.
+- The canonical GitHub/Zoho truth remains live Zoho plus live GitHub; `task_repo_map.json` is the local reconciliation cache.
