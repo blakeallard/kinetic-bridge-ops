@@ -67,6 +67,21 @@ Why:
   - type: `closed`
   - color: `#74cb80`
 
+### Confirmed Zoho kanban columns
+
+The live API sample only observed statuses currently assigned to tasks, but the actual Zoho Projects kanban columns are:
+
+- `In Progress`
+- `Backlog`
+- `Needs Approval`
+- `Blocker`
+- `Closed`
+
+Important note:
+
+- `Blocker` is a real Zoho kanban status even though the current API sample showed `0` tasks in that column at discovery time.
+- Phase 5B must include `Blocker` in the mirror design and must not assume the observed sample is the complete status set.
+
 ### Redacted sample task status payloads
 
 Sample 1:
@@ -151,87 +166,110 @@ Sample 3:
 
 ### Discovery result
 
-GitHub Project discovery via `gh project` is currently blocked.
+Confirmed GitHub Project target:
 
-Observed read-only CLI result:
+- Owner: `blake-bevco-tech`
+- Project number: `1`
+- Project ID: `PVT_kwHOEZB-V84BcWRd`
+- Project URL: `https://github.com/users/blake-bevco-tech/projects/1`
 
-- `gh project list --owner blake-bevco-tech --format json`
-- returned:
-  - authentication token missing required scope `read:project`
+Confirmed Status field:
 
-Additional auth check in the restricted shell also indicated the local `gh` token state is not currently healthy there.
+- Name: `Status`
+- Field ID: `PVTSSF_lAHOEZB-V84BcWRdzhW_yOs`
+- Type: `ProjectV2SingleSelectField`
+
+Confirmed current Status options:
+
+- `Todo` -> `f75ad846`
+- `In Progress` -> `47fc9ee4`
+- `Done` -> `98236657`
 
 ### What this means
 
-- I could not determine from live GitHub data whether a suitable org-level Project already exists.
-- I could not discover any Project number, Project node ID, field list, field IDs, or status option IDs.
-- Phase 5B implementation should not start until GitHub Project read access is repaired.
+- A suitable GitHub Project already exists and should be treated as the Phase 5 target.
+- The minimum Project identifiers required for implementation are now known.
+- Phase 5B still should not start until the Status option gap for `Needs Approval` is resolved.
 
 ## [RECOMMENDED PROJECT TARGET]
 
-If no suitable GitHub Project already exists once `read:project` access is restored, create this org-level Project manually:
+Use the existing Project:
 
-- `BEVCO Summer AI Execution`
+- `BEVCO Summer AI Execution` is no longer a recommendation to create by default if Project `1` is the intended board.
 
-Recommended characteristics:
+Current target:
 
 - Owner: `blake-bevco-tech`
-- Project type: GitHub Project (Projects v2)
-- Purpose: mirror Zoho task execution state for repo-backed AI workspaces
+- Project number: `1`
+- Project ID: `PVT_kwHOEZB-V84BcWRd`
+- Project URL: `https://github.com/users/blake-bevco-tech/projects/1`
 
-Recommended minimum fields:
+Recommended confirmation before Phase 5B:
 
-- `Title`
-- `Status`
-- `Repository` or linked issue context through the Project item
-- Optional later:
-  - `Zoho Task Key`
-  - `Zoho Task ID`
-  - `Local Repo Path`
+- Verify that Project `1` is intended to mirror the Zoho summer execution workflow.
+- Add a `Needs Approval` single-select option before implementation begins.
 
 ## [PROPOSED STATUS MAPPING]
 
-Recommended first-pass one-way mapping:
+Recommended true-mirror target:
 
-- Zoho `Backlog` -> GitHub Project `Backlog`
-- Zoho `In Progress` -> GitHub Project `In Progress`
-- Zoho `Needs Approval` -> GitHub Project `Needs Approval`
-- Zoho `Closed` -> GitHub Project `Done`
+GitHub Project `Status` options should exactly mirror Zoho:
 
-Alternative if the target Project only has GitHub default options:
+- `Backlog`
+- `In Progress`
+- `Needs Approval`
+- `Blocker`
+- `Closed`
 
-- Zoho `Backlog` -> GitHub `Todo`
+Recommended v1 one-way mapping:
+
+- Zoho `Backlog` -> GitHub `Backlog`
 - Zoho `In Progress` -> GitHub `In Progress`
-- Zoho `Needs Approval` -> GitHub `In Review`
-- Zoho `Closed` -> GitHub `Done`
+- Zoho `Needs Approval` -> GitHub `Needs Approval`
+- Zoho `Blocker` -> GitHub `Blocker`
+- Zoho `Closed` -> GitHub `Closed`
+
+Important rule:
+
+- Do not map Zoho `Backlog` to GitHub `Todo` if the goal is a true mirror.
+- Do not map Zoho `Closed` to GitHub `Done` if the goal is a true mirror.
 
 Recommendation:
 
-- Prefer creating explicit Project status options that match Zoho names exactly:
-  - `Backlog`
-  - `In Progress`
-  - `Needs Approval`
-  - `Done`
-
-That will minimize translation logic and reduce accidental overwrite risk.
+- Update the GitHub Project `Status` field options to match Zoho exactly before Phase 5B implementation.
+- Prefer exact-name matching over a translation table when the goal is a kanban mirror.
 
 ## [REQUIRED CONFIG]
 
 ### Already known
 
 - GitHub owner/org: `blake-bevco-tech`
+- GitHub Project number: `1`
+- GitHub Project ID: `PVT_kwHOEZB-V84BcWRd`
+- GitHub Project URL: `https://github.com/users/blake-bevco-tech/projects/1`
+- GitHub Status field name: `Status`
+- GitHub Status field ID: `PVTSSF_lAHOEZB-V84BcWRdzhW_yOs`
+- GitHub Status field type: `ProjectV2SingleSelectField`
+- GitHub Status option `Todo`: `f75ad846`
+- GitHub Status option `In Progress`: `47fc9ee4`
+- GitHub Status option `Done`: `98236657`
 - Zoho project ID for issue metadata: present in runtime env and already used by the script
 - Zoho source status field: `status`
+- Confirmed Zoho kanban columns:
+  - `Backlog`
+  - `In Progress`
+  - `Needs Approval`
+  - `Blocker`
+  - `Closed`
 
-### Still required from GitHub Project discovery
+### Still required before Phase 5B implementation
 
-- GitHub Project number
-- GitHub Project node ID, if needed by the chosen CLI/API call path
-- Exact Project name
-- `Status` field name
-- `Status` field ID
-- Available status option names
-- Available status option IDs
+- Confirmed Project display name if it should be referenced in code/comments/docs
+- A GitHub Status option for `Backlog`
+- A GitHub Status option for `Needs Approval`
+- A GitHub Status option for `Blocker`
+- A GitHub Status option for `Closed`
+- The option IDs for all mirror-aligned Status options once they are added or renamed
 
 ### Likely state additions for Phase 5B
 
@@ -245,9 +283,10 @@ That will minimize translation logic and reduce accidental overwrite risk.
 
 ## [IMPLEMENTATION RISKS]
 
-- GitHub Project discovery is currently blocked by missing `read:project` scope.
-- If multiple GitHub Projects have similar names, project targeting must be explicit by number/ID.
-- If the Project `Status` field options do not match Zoho naming, the mapping table must be explicit and versioned.
+- GitHub Project currently does not exactly mirror the Zoho kanban column set.
+- If the mirror requirement remains strict, the current `Todo` and `Done` options are not acceptable substitutes for `Backlog` and `Closed`.
+- If `Needs Approval` or `Blocker` is encountered in Zoho before matching Project options exist, the sync must block rather than silently degrading those states.
+- If the Project `Status` field options do not match Zoho naming, the mapping table becomes a translation layer rather than a mirror and should be treated as a temporary fallback only.
 - If GitHub Project status is edited manually, one-way Zoho -> GitHub sync will overwrite it unless a guard is added.
 - Unknown future Zoho statuses must block or route to a configured fallback rather than guessing.
 - Project item creation will need to decide whether to key items by:
@@ -258,30 +297,36 @@ That will minimize translation logic and reduce accidental overwrite risk.
 
 ## [PHASE 5B IMPLEMENTATION PLAN]
 
-1. Restore GitHub Project read access with `read:project`.
-2. Discover and document the target Project number/ID and `Status` field options.
-3. Add read-only Project discovery helpers to the script:
+1. Treat Project `1` as the implementation target.
+2. Update the GitHub Project `Status` field so it exactly mirrors Zoho:
+   - `Backlog`
+   - `In Progress`
+   - `Needs Approval`
+   - `Blocker`
+   - `Closed`
+3. Record the final option IDs in implementation config.
+4. Add read-only Project discovery helpers to the script:
    - find target Project
    - fetch fields/options
    - map Zoho status name -> GitHub option ID
-4. Extend dry-run reporting to include Project planning:
+5. Extend dry-run reporting to include Project planning:
    - would create/find Project item
    - would set Project status
    - blocked due to unknown status or missing Project config
-5. In apply mode only, after repo + issue verification:
+6. In apply mode only, after repo + issue verification:
    - create or verify the Project item linked to the issue
    - set the `Status` field one-way from Zoho
-6. Extend `task_repo_map.json` atomically with Project metadata.
-7. Preserve conflict-first behavior:
+7. Extend `task_repo_map.json` atomically with Project metadata.
+8. Preserve conflict-first behavior:
    - multiple Project item matches -> block
    - unknown Zoho status -> block
    - missing Status field/option -> block
 
 ## [BLOCKERS]
 
-- GitHub CLI token for the current environment lacks `read:project`, so live Project discovery could not complete.
-- Because Project discovery is blocked, the following implementation inputs remain unknown:
-  - whether a suitable Project already exists
-  - Project number/ID
-  - field names/IDs
-  - status option names/IDs
+- GitHub Project currently does not exactly mirror the Zoho kanban columns.
+- Phase 5B should not proceed as a true mirror until matching Project options exist for:
+  - `Backlog`
+  - `Needs Approval`
+  - `Blocker`
+  - `Closed`
