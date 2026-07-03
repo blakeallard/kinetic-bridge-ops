@@ -34,7 +34,6 @@ SOURCE_TOKEN_CACHE = HOME / "bevco/scripts/zoho_projects_to_cliq/zoho_access_tok
 LOCAL_REPO_ROOT = HOME / "bevco/repos"
 GITHUB_ORG = os.environ.get("GITHUB_ORG", "blake-bevco-tech")
 APPROVAL_TAG = "repo-needed"
-APPLY_TASK_KEY = "BI1-T71"
 REQUIRED_ENV_NAMES = {
     "ZOHO_CLIENT_ID",
     "ZOHO_CLIENT_SECRET",
@@ -449,7 +448,7 @@ class ApplyBlocked(RuntimeError):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Dry-run by default; controlled apply is restricted to BI1-T71."
+        description="Dry-run by default; apply is confirmation-gated per eligible repo-needed task."
     )
     parser.add_argument("--apply", action="store_true", help="Enable the controlled one-task apply path")
     parser.add_argument("--task-key", help="Required task key for apply mode")
@@ -466,8 +465,6 @@ def validate_apply_gate(args: argparse.Namespace) -> str:
         return ""
     if not args.task_key:
         return "apply mode requires --task-key"
-    if args.task_key.upper() != APPLY_TASK_KEY:
-        return f"apply allowlist permits only {APPLY_TASK_KEY}"
     if args.confirm_apply != args.task_key:
         return f"apply mode requires --confirm-apply {args.task_key}"
     return ""
@@ -653,6 +650,11 @@ def verify_resume_candidate(task: dict[str, Any], decision: Decision) -> None:
         raise ApplyBlocked(f"task no longer has required tag {APPROVAL_TAG}")
 
 
+def classify_existing_apply_state(task: dict[str, Any], decision: Decision) -> str:
+    verify_resume_candidate(task, decision)
+    return "resume"
+
+
 def ensure_local_files(local_path: Path, task: dict[str, Any], decision: Decision, repo_url: str) -> None:
     if local_path.exists() and (local_path.is_symlink() or not local_path.is_dir()):
         raise ApplyBlocked(f"refusing unsafe local repository path: {local_path}")
@@ -826,14 +828,12 @@ def apply_one_task(
     task: dict[str, Any],
     decision: Decision,
 ) -> None:
-    if decision.task_key != APPLY_TASK_KEY:
-        raise ApplyBlocked(f"apply allowlist permits only {APPLY_TASK_KEY}")
     if APPROVAL_TAG not in extract_tags(task):
         raise ApplyBlocked(f"task no longer has exact tag {APPROVAL_TAG}")
     if decision.action == "blocked":
         raise ApplyBlocked(f"dry-run eligibility is blocked: {decision.reason}")
     if decision.action == "existing":
-        verify_resume_candidate(task, decision)
+        classify_existing_apply_state(task, decision)
         report.add("WARN", "K. Apply execution", "verified partial existing state; continuing idempotent resume")
     elif decision.action != "would-create":
         raise ApplyBlocked(f"unsupported apply decision: {decision.action}")
@@ -1115,6 +1115,42 @@ def group_decisions(decisions: list[Decision]) -> DecisionGroups:
     )
 
 
+def find_selected_task_decision(
+    tagged_tasks: list[dict[str, Any]],
+    decisions: list[Decision],
+    selected_task_key: str,
+) -> tuple[dict[str, Any] | None, Decision | None]:
+    normalized = selected_task_key.upper()
+    selected_task = next(
+        (task for task in tagged_tasks if extract_task_key(task) == normalized),
+        None,
+    )
+    selected_decision = next(
+        (decision for decision in decisions if decision.task_key == normalized),
+        None,
+    )
+    return selected_task, selected_decision
+
+
+def validate_apply_eligibility(
+    *,
+    selected_task: dict[str, Any] | None,
+    selected_decision: Decision | None,
+    selected_task_key: str,
+) -> None:
+    if selected_task is None:
+        raise ApplyBlocked(f"{selected_task_key} is not currently tagged {APPROVAL_TAG}")
+    if selected_decision is None:
+        raise ApplyBlocked(f"no dry-run decision exists for {selected_task_key}")
+    if selected_decision.action == "blocked":
+        raise ApplyBlocked(f"dry-run preflight is blocked: {selected_decision.reason}")
+    if selected_decision.action == "existing":
+        classify_existing_apply_state(selected_task, selected_decision)
+        return
+    if selected_decision.action != "would-create":
+        raise ApplyBlocked(f"apply supports only would-create or safe existing-resume decisions; got {selected_decision.action}")
+
+
 def add_summary_sections(
     report: Report,
     *,
@@ -1236,7 +1272,7 @@ def execute_apply_mode(
     report.add(
         "INFO",
         "J. Apply safety",
-        f"apply mode is hard-limited to {APPLY_TASK_KEY} and requires matching --task-key and --confirm-apply values",
+        "apply mode requires matching --task-key and --confirm-apply values for one eligible repo-needed task from the current Zoho read",
     )
     if apply_gate_error:
         report.add("BLOCKED", "K. Apply execution", apply_gate_error)
@@ -1249,28 +1285,22 @@ def execute_apply_mode(
         )
         return
 
-    selected_task = next(
-        (task for task in tagged_tasks if extract_task_key(task) == args.task_key.upper()),
-        None,
+    selected_task, selected_decision = find_selected_task_decision(
+        tagged_tasks=tagged_tasks,
+        decisions=decisions,
+        selected_task_key=args.task_key,
     )
-    selected_decision = next(
-        (decision for decision in decisions if decision.task_key == args.task_key.upper()),
-        None,
-    )
-    if selected_task is None:
-        report.add("BLOCKED", "K. Apply execution", f"{args.task_key} is not currently tagged {APPROVAL_TAG}")
-        return
-    if selected_decision is None:
-        report.add("BLOCKED", "K. Apply execution", f"no dry-run decision exists for {args.task_key}")
-        return
-    if selected_decision.action == "blocked":
-        report.add(
-            "BLOCKED",
-            "K. Apply execution",
-            f"dry-run preflight is blocked: {selected_decision.reason}",
+    try:
+        validate_apply_eligibility(
+            selected_task=selected_task,
+            selected_decision=selected_decision,
+            selected_task_key=args.task_key,
         )
+    except ApplyBlocked as exc:
+        report.add("BLOCKED", "K. Apply execution", str(exc))
         return
 
+    assert selected_decision is not None
     local_path = LOCAL_REPO_ROOT / selected_decision.repo_name
     plan_messages = (
         f"apply plan: create or verify local path {local_path}",
@@ -1284,6 +1314,7 @@ def execute_apply_mode(
         print(f"[{label}] {message}")
     print(f"[INFO] explicit apply confirmation accepted for {args.task_key}")
     try:
+        assert selected_task is not None
         apply_one_task(report, env, token, selected_task, selected_decision)
         report.add("SUCCESS", "K. Apply execution", f"controlled apply completed for {args.task_key}")
     except ApplyBlocked as exc:
