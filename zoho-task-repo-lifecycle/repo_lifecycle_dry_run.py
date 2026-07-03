@@ -56,6 +56,8 @@ SECRET_PATTERN = re.compile(
     r"(?i)([\"']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|client[_-]?secret|secret|password|zapikey|webhook)[A-Za-z0-9_-]*[\"']?\s*[:=]\s*)"
     r"(?:[\"'][^\"']*[\"']|[^\s,;]+)"
 )
+ISSUE_TASK_ID_MARKER = "<!-- zoho-task-id: {task_id} -->"
+ISSUE_TASK_KEY_MARKER = "<!-- zoho-task-key: {task_key} -->"
 
 
 @dataclass
@@ -74,6 +76,14 @@ class Decision:
     action: str
     reason: str
     missing_metadata: list[str] = field(default_factory=list)
+
+
+@dataclass
+class IssueRecord:
+    number: str
+    url: str
+    title: str
+    body: str
 
 
 @dataclass
@@ -442,6 +452,23 @@ def mapping_evidence(entries: list[dict[str, str]], task_id: str, task_key: str,
     return matching, conflicts
 
 
+def mapping_entry_for_task(
+    entries: list[dict[str, str]],
+    task_id: str,
+    task_key: str,
+    repo_name: str,
+) -> dict[str, str] | None:
+    for entry in entries:
+        entry_id = entry.get("task_id", "")
+        entry_key = entry.get("task_key", "")
+        entry_repo = entry.get("repo_name", "")
+        same_task = entry_id == task_id or entry_key.upper() == task_key.upper()
+        same_repo = entry_repo.lower() == repo_name.lower() if entry_repo else False
+        if same_task or same_repo:
+            return entry
+    return None
+
+
 class ApplyBlocked(RuntimeError):
     """A safety or idempotency check refused an apply step."""
 
@@ -513,6 +540,95 @@ def sanitize_metadata(value: Any, key_name: str = "") -> Any:
         text = SECRET_PATTERN.sub(r"\1[REDACTED]", text)
         return re.sub(r"(?i)(https?://[^\s?]+)\?[^\s]+", r"\1?[REDACTED]", text)
     return value
+
+
+def issue_task_id_marker(task_id: str) -> str:
+    return ISSUE_TASK_ID_MARKER.format(task_id=task_id)
+
+
+def issue_task_key_marker(task_key: str) -> str:
+    return ISSUE_TASK_KEY_MARKER.format(task_key=task_key)
+
+
+def build_issue_title(decision: Decision) -> str:
+    return f"[{decision.task_key}] {decision.title}"
+
+
+def task_web_url(task: dict[str, Any]) -> str:
+    direct = str(task.get("url") or task.get("web_url") or task.get("task_url") or "").strip()
+    if direct:
+        return direct
+    link = task.get("link")
+    if isinstance(link, dict):
+        web = link.get("web")
+        if isinstance(web, dict):
+            value = str(web.get("url") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def build_issue_body(
+    task: dict[str, Any],
+    decision: Decision,
+    env: dict[str, str],
+    repo_url: str,
+    local_path: Path,
+) -> str:
+    description = plain_text(str(sanitize_metadata(str(task.get("description") or "")))) or "No task description was provided."
+    status = task_status(task)
+    task_url = task_web_url(task) or "Not provided"
+    return "\n".join(
+        [
+            issue_task_id_marker(decision.task_id),
+            issue_task_key_marker(decision.task_key),
+            "",
+            "## Zoho Metadata",
+            "",
+            f"- Zoho Project ID: {env.get('ZOHO_PROJECT_ID', 'Not provided')}",
+            f"- Zoho Task ID: {decision.task_id}",
+            f"- Zoho Task Key: {decision.task_key}",
+            f"- Zoho Task Title: {decision.title}",
+            f"- Zoho URL: {task_url}",
+            "",
+            "## Workspace",
+            "",
+            f"- GitHub Repo URL: {repo_url}",
+            f"- Local Repo Path: {local_path}",
+            f"- Current Zoho Status: {status}",
+            "",
+            "## Task Description",
+            "",
+            description,
+            "",
+            "## Acceptance Criteria",
+            "",
+            "- [ ] Acceptance criteria to be confirmed",
+            "",
+            "## Agent Notes",
+            "",
+            "- Add implementation notes, assumptions, and validation details here.",
+            "",
+            "## Deployment Notes",
+            "",
+            "- [ ] No deployment required yet",
+            "- [ ] Deployment approach to be confirmed",
+            "",
+        ]
+    )
+
+
+def parse_issue_record(data: dict[str, Any]) -> IssueRecord:
+    return IssueRecord(
+        number=str(data.get("number") or ""),
+        url=str(data.get("url") or ""),
+        title=str(data.get("title") or ""),
+        body=str(data.get("body") or ""),
+    )
+
+
+def issue_markers_match(issue: IssueRecord, task_id: str, task_key: str) -> bool:
+    return issue_task_id_marker(task_id) in issue.body and issue_task_key_marker(task_key) in issue.body
 
 
 def load_template(relative_name: str) -> str:
@@ -602,6 +718,161 @@ def require_command_success(result: subprocess.CompletedProcess[str], operation:
     detail = (result.stderr or result.stdout).strip().splitlines()
     reason = detail[-1] if detail else f"exit {result.returncode}"
     raise ApplyBlocked(f"{operation} failed: {redact(reason)}")
+
+
+def run_gh_json(arguments: list[str], operation: str, timeout: int = 30) -> list[dict[str, Any]] | dict[str, Any]:
+    result = run_gh(arguments, timeout=timeout)
+    if result is None:
+        raise ApplyBlocked(f"{operation} did not complete")
+    require_command_success(result, operation)
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        raise ApplyBlocked(f"{operation} returned invalid JSON") from None
+    if not isinstance(data, (list, dict)):
+        raise ApplyBlocked(f"{operation} returned an unexpected response")
+    return data
+
+
+def list_repo_issues(repo_name: str) -> list[IssueRecord]:
+    data = run_gh_json(
+        [
+            "issue",
+            "list",
+            "--repo",
+            f"{GITHUB_ORG}/{repo_name}",
+            "--state",
+            "all",
+            "--limit",
+            "200",
+            "--json",
+            "number,title,url,body",
+        ],
+        "GitHub issue list",
+        timeout=60,
+    )
+    if not isinstance(data, list):
+        raise ApplyBlocked("GitHub issue list returned an unexpected response")
+    return [parse_issue_record(item) for item in data if isinstance(item, dict)]
+
+
+def view_repo_issue(repo_name: str, issue_number: str) -> IssueRecord:
+    data = run_gh_json(
+        [
+            "issue",
+            "view",
+            issue_number,
+            "--repo",
+            f"{GITHUB_ORG}/{repo_name}",
+            "--json",
+            "number,title,url,body",
+        ],
+        "GitHub issue view",
+    )
+    if not isinstance(data, dict):
+        raise ApplyBlocked("GitHub issue view returned an unexpected response")
+    return parse_issue_record(data)
+
+
+def find_existing_issue_by_marker(repo_name: str, task_id: str, task_key: str, issue_title: str) -> IssueRecord | None:
+    issues = list_repo_issues(repo_name)
+    partial_marker_matches = [
+        issue
+        for issue in issues
+        if (issue_task_id_marker(task_id) in issue.body) != (issue_task_key_marker(task_key) in issue.body)
+    ]
+    if partial_marker_matches:
+        raise ApplyBlocked(
+            f"GitHub issue marker is incomplete for {task_key}: #{partial_marker_matches[0].number}"
+        )
+    marker_matches = [issue for issue in issues if issue_markers_match(issue, task_id, task_key)]
+    if len(marker_matches) > 1:
+        raise ApplyBlocked(f"multiple GitHub issues match Zoho task marker for {task_key}")
+    conflicting_title_matches = [
+        issue
+        for issue in issues
+        if issue.title == issue_title and not issue_markers_match(issue, task_id, task_key)
+    ]
+    if conflicting_title_matches:
+        raise ApplyBlocked(
+            f"GitHub issue title already exists with a different Zoho marker: #{conflicting_title_matches[0].number}"
+        )
+    return marker_matches[0] if marker_matches else None
+
+
+def verify_mapped_issue(
+    repo_name: str,
+    task_id: str,
+    task_key: str,
+    entry: dict[str, str],
+    issue_title: str,
+) -> IssueRecord:
+    issue_number = entry.get("issue_number", "").strip()
+    issue_url = entry.get("issue_url", "").strip()
+    if not issue_number or not issue_url:
+        raise ApplyBlocked("mapping entry has incomplete GitHub issue metadata")
+    issue = view_repo_issue(repo_name, issue_number)
+    if issue.url != issue_url:
+        raise ApplyBlocked("mapped GitHub issue URL does not match the live issue")
+    if issue.title != issue_title:
+        raise ApplyBlocked("mapped GitHub issue title does not match the expected Zoho task title")
+    if not issue_markers_match(issue, task_id, task_key):
+        raise ApplyBlocked("mapped GitHub issue marker does not match the Zoho task")
+    return issue
+
+
+def create_github_issue(repo_name: str, title: str, body: str) -> None:
+    result = run_gh(
+        [
+            "issue",
+            "create",
+            "--repo",
+            f"{GITHUB_ORG}/{repo_name}",
+            "--title",
+            title,
+            "--body",
+            body,
+        ],
+        timeout=60,
+    )
+    if result is None:
+        raise ApplyBlocked("GitHub issue creation did not complete")
+    require_command_success(result, "GitHub issue creation")
+
+
+def create_or_verify_issue(
+    *,
+    task: dict[str, Any],
+    decision: Decision,
+    env: dict[str, str],
+    repo_url: str,
+    local_path: Path,
+    mapping_entry: dict[str, str] | None,
+    allow_create: bool,
+) -> tuple[str, IssueRecord | None]:
+    issue_title = build_issue_title(decision)
+    if mapping_entry and (mapping_entry.get("issue_number") or mapping_entry.get("issue_url")):
+        issue = verify_mapped_issue(
+            repo_name=decision.repo_name,
+            task_id=decision.task_id,
+            task_key=decision.task_key,
+            entry=mapping_entry,
+            issue_title=issue_title,
+        )
+        return "issue already mapped", issue
+    issue = find_existing_issue_by_marker(decision.repo_name, decision.task_id, decision.task_key, issue_title)
+    if issue is not None:
+        if issue.title != issue_title:
+            raise ApplyBlocked("GitHub issue marker exists but the issue title does not match the expected Zoho task title")
+        return "issue found by marker", issue
+    if not allow_create:
+        return "would create issue", None
+    issue_body = build_issue_body(task, decision, env, repo_url, local_path)
+    create_github_issue(decision.repo_name, issue_title, issue_body)
+    issue = find_existing_issue_by_marker(decision.repo_name, decision.task_id, decision.task_key, issue_title)
+    if issue is None:
+        raise ApplyBlocked("GitHub issue was not found after creation")
+    return "issue created", issue
 
 
 def github_repo_details(repo_name: str) -> dict[str, Any] | None:
@@ -792,6 +1063,63 @@ def write_task_mapping(task: dict[str, Any], decision: Decision, repo_url: str, 
     return True
 
 
+def update_mapping_with_issue(
+    task: dict[str, Any],
+    decision: Decision,
+    repo_url: str,
+    local_path: Path,
+    issue: IssueRecord,
+) -> bool:
+    mapping_path = PROJECT_DIR / "task_repo_map.json"
+    if not mapping_path.exists():
+        raise ApplyBlocked("task_repo_map.json is missing before GitHub issue update")
+    try:
+        with mapping_path.open() as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ApplyBlocked(f"task_repo_map.json is unreadable: {exc}") from None
+    if not isinstance(data, dict) or not isinstance(data.get("mappings"), list):
+        raise ApplyBlocked("task_repo_map.json has an unsupported structure")
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    expected = {
+        "task_id": decision.task_id,
+        "task_key": decision.task_key,
+        "title": decision.title,
+        "repo_name": decision.repo_name,
+        "repo_url": repo_url,
+        "local_path": str(local_path),
+    }
+    for entry in data["mappings"]:
+        if not isinstance(entry, dict):
+            continue
+        same_task = str(entry.get("task_id") or "") == decision.task_id or str(entry.get("task_key") or "").upper() == decision.task_key
+        same_repo = str(entry.get("repo_name") or "").lower() == decision.repo_name.lower()
+        if not (same_task or same_repo):
+            continue
+        for key, value in expected.items():
+            if str(entry.get(key) or "") != value:
+                raise ApplyBlocked(f"existing task_repo_map.json entry conflicts on {key}")
+        existing_number = str(entry.get("issue_number") or "")
+        existing_url = str(entry.get("issue_url") or "")
+        if existing_number and existing_number != issue.number:
+            raise ApplyBlocked("existing task_repo_map.json issue_number conflicts with the verified GitHub issue")
+        if existing_url and existing_url != issue.url:
+            raise ApplyBlocked("existing task_repo_map.json issue_url conflicts with the verified GitHub issue")
+        changed = existing_number != issue.number or existing_url != issue.url
+        entry["issue_number"] = issue.number
+        entry["issue_url"] = issue.url
+        if not str(entry.get("issue_created_at") or ""):
+            entry["issue_created_at"] = now
+        else:
+            entry["issue_updated_at"] = now
+        temporary = mapping_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(data, indent=2) + "\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, mapping_path)
+        return changed
+    raise ApplyBlocked("task_repo_map.json entry was not found for GitHub issue update")
+
+
 def post_zoho_comment(env: dict[str, str], token: str, task_id: str, repo_url: str) -> bool:
     comment = f"GitHub repo created: {repo_url}"
     existing = fetch_comments(env, token, task_id)
@@ -834,28 +1162,44 @@ def apply_one_task(
         raise ApplyBlocked(f"dry-run eligibility is blocked: {decision.reason}")
     if decision.action == "existing":
         classify_existing_apply_state(task, decision)
-        report.add("WARN", "K. Apply execution", "verified partial existing state; continuing idempotent resume")
+        report.add("WARN", "L. Apply execution", "verified partial existing state; continuing idempotent resume")
     elif decision.action != "would-create":
         raise ApplyBlocked(f"unsupported apply decision: {decision.action}")
 
     local_path = LOCAL_REPO_ROOT / decision.repo_name
     provisional_url = f"https://github.com/{GITHUB_ORG}/{decision.repo_name}"
     ensure_local_files(local_path, task, decision, provisional_url)
-    report.add("SUCCESS", "K. Apply execution", f"local starter files verified at {local_path}")
+    report.add("SUCCESS", "L. Apply execution", f"local starter files verified at {local_path}")
     ensure_git_repository(local_path)
-    report.add("SUCCESS", "K. Apply execution", "local Git repository initialized or verified on main")
+    report.add("SUCCESS", "L. Apply execution", "local Git repository initialized or verified on main")
     repo_url = ensure_github_repository(decision.repo_name)
-    report.add("SUCCESS", "K. Apply execution", f"private GitHub repository verified: {repo_url}")
+    report.add("SUCCESS", "L. Apply execution", f"private GitHub repository verified: {repo_url}")
     ensure_origin(local_path, decision.repo_name)
-    report.add("SUCCESS", "K. Apply execution", "origin remote verified")
+    report.add("SUCCESS", "L. Apply execution", "origin remote verified")
     commit_and_push(local_path, decision.task_key)
-    report.add("SUCCESS", "K. Apply execution", "starter files committed and main pushed")
+    report.add("SUCCESS", "L. Apply execution", "starter files committed and main pushed")
     mapping_written = write_task_mapping(task, decision, repo_url, local_path)
     mapping_action = "written" if mapping_written else "already present and verified"
-    report.add("SUCCESS", "K. Apply execution", f"task_repo_map.json {mapping_action}")
+    report.add("SUCCESS", "L. Apply execution", f"task_repo_map.json {mapping_action}")
+    mapping_entry = mapping_entry_for_task(mapping_entries()[0], decision.task_id, decision.task_key, decision.repo_name)
+    issue_action, issue = create_or_verify_issue(
+        task=task,
+        decision=decision,
+        env=env,
+        repo_url=repo_url,
+        local_path=local_path,
+        mapping_entry=mapping_entry,
+        allow_create=True,
+    )
+    if issue is None:
+        raise ApplyBlocked("GitHub issue verification did not produce issue metadata")
+    issue_mapping_written = update_mapping_with_issue(task, decision, repo_url, local_path, issue)
+    issue_mapping_action = "updated" if issue_mapping_written else "already present and verified"
+    report.add("SUCCESS", "L. Apply execution", f"{issue_action}: {issue.url}")
+    report.add("SUCCESS", "L. Apply execution", f"task_repo_map.json issue metadata {issue_mapping_action}")
     comment_written = post_zoho_comment(env, token, decision.task_id, repo_url)
     comment_action = "written" if comment_written else "already present and verified"
-    report.add("SUCCESS", "K. Apply execution", f"Zoho repository comment {comment_action}")
+    report.add("SUCCESS", "L. Apply execution", f"Zoho repository comment {comment_action}")
 
 
 def write_report(report: Report) -> Path:
@@ -1115,6 +1459,61 @@ def group_decisions(decisions: list[Decision]) -> DecisionGroups:
     )
 
 
+def evaluate_issue_actions(
+    tagged_tasks: list[dict[str, Any]],
+    decisions: list[Decision],
+    mappings: list[dict[str, str]],
+    env: dict[str, str],
+    github_state: str,
+) -> list[tuple[str, str]]:
+    issue_findings: list[tuple[str, str]] = []
+    task_by_key = {extract_task_key(task): task for task in tagged_tasks if extract_task_key(task)}
+    for decision in decisions:
+        task = task_by_key.get(decision.task_key)
+        if task is None:
+            issue_findings.append(("BLOCKED", f"{decision.task_key or decision.task_id}: missing Zoho task data for issue planning"))
+            continue
+        if decision.action == "blocked":
+            issue_findings.append(("BLOCKED", f"{decision.task_key}: issue planning blocked because repo preflight is blocked: {decision.reason}"))
+            continue
+        if decision.action == "would-create":
+            issue_findings.append(("INFO", f"{decision.task_key}: would create issue {build_issue_title(decision)} after private repo creation"))
+            continue
+        if github_state != "ready":
+            issue_findings.append(("BLOCKED", f"{decision.task_key}: GitHub issue verification requires authenticated GitHub CLI access"))
+            continue
+        mapping_entry = mapping_entry_for_task(mappings, decision.task_id, decision.task_key, decision.repo_name)
+        repo_url = (
+            mapping_entry.get("repo_url", "").strip()
+            if mapping_entry is not None
+            else f"https://github.com/{GITHUB_ORG}/{decision.repo_name}"
+        )
+        local_path = Path(
+            mapping_entry.get("local_path", str(LOCAL_REPO_ROOT / decision.repo_name))
+            if mapping_entry is not None
+            else str(LOCAL_REPO_ROOT / decision.repo_name)
+        )
+        try:
+            issue_action, issue = create_or_verify_issue(
+                task=task,
+                decision=decision,
+                env=env,
+                repo_url=repo_url,
+                local_path=local_path,
+                mapping_entry=mapping_entry,
+                allow_create=False,
+            )
+        except ApplyBlocked as exc:
+            issue_findings.append(("BLOCKED", f"{decision.task_key}: {exc}"))
+            continue
+        if issue is None:
+            issue_findings.append(("INFO", f"{decision.task_key}: {issue_action}"))
+        else:
+            label = "SKIPPED" if issue_action == "issue already mapped" else "INFO"
+            issue_findings.append((label, f"{decision.task_key}: {issue_action}; {issue.url}"))
+    return issue_findings
+
+
 def find_selected_task_decision(
     tagged_tasks: list[dict[str, Any]],
     decisions: list[Decision],
@@ -1159,6 +1558,7 @@ def add_summary_sections(
     untagged_count: int,
     decision_groups: DecisionGroups,
     mapping_findings: list[tuple[str, str]],
+    issue_findings: list[tuple[str, str]],
 ) -> None:
     report.add("INFO", "A. Summary counts", f"total Zoho tasks: {total_tasks}")
     report.add("INFO", "A. Summary counts", f"tagged repo-needed: {len(tagged_tasks)}")
@@ -1211,21 +1611,27 @@ def add_summary_sections(
             "no tagged task resolved to existing or mapped repository evidence",
         )
 
+    if issue_findings:
+        for label, message in issue_findings:
+            report.add(label, "F. GitHub issue actions", message)
+    else:
+        report.add("INFO", "F. GitHub issue actions", "no GitHub issue actions are applicable for this run")
+
     if decision_groups.blocked:
         for decision in decision_groups.blocked:
             identity = decision.task_key or decision.task_id or "unknown-task"
-            report.add("BLOCKED", "F. Blocked tasks", f"{identity}: {decision.reason}")
+            report.add("BLOCKED", "G. Blocked tasks", f"{identity}: {decision.reason}")
     else:
-        report.add("SUCCESS", "F. Blocked tasks", "no tagged tasks are blocked")
+        report.add("SUCCESS", "G. Blocked tasks", "no tagged tasks are blocked")
 
     if decision_groups.missing_metadata:
         for decision in decision_groups.missing_metadata:
             identity = decision.task_key or decision.task_id or "unknown-task"
-            report.add("BLOCKED", "G. Missing metadata", f"{identity} missing: {', '.join(decision.missing_metadata)}")
+            report.add("BLOCKED", "H. Missing metadata", f"{identity} missing: {', '.join(decision.missing_metadata)}")
     else:
         report.add(
             "SUCCESS",
-            "G. Missing metadata",
+            "H. Missing metadata",
             "no tagged tasks are missing required key, title, or immutable ID",
         )
 
@@ -1241,20 +1647,20 @@ def add_integration_sections(
     comments_checked: int,
 ) -> None:
     for label, message in github_findings:
-        report.add(label, "H. GitHub read-only check result", message)
+        report.add(label, "I. GitHub read-only check result", message)
     github_mode_note = "dry-run used no GitHub write commands" if not args.apply else "apply writes remain confirmation-gated"
     report.add(
         "INFO",
-        "H. GitHub read-only check result",
+        "I. GitHub read-only check result",
         f"GitHub organization: {GITHUB_ORG}; repo view checks executed: {github_checks}; {github_mode_note}",
     )
 
     for label, message in zoho_findings:
-        report.add(label, "I. Zoho read-only check result", message)
+        report.add(label, "J. Zoho read-only check result", message)
     zoho_mode_note = "no task updates or comments were written" if not args.apply else "write-back remains confirmation-gated"
     report.add(
         "INFO",
-        "I. Zoho read-only check result",
+        "J. Zoho read-only check result",
         f"task-list reads: {1 if total_tasks else 0}; tagged-task comment reads: {comments_checked}; {zoho_mode_note}",
     )
 
@@ -1271,16 +1677,16 @@ def execute_apply_mode(
 ) -> None:
     report.add(
         "INFO",
-        "J. Apply safety",
+        "K. Apply safety",
         "apply mode requires matching --task-key and --confirm-apply values for one eligible repo-needed task from the current Zoho read",
     )
     if apply_gate_error:
-        report.add("BLOCKED", "K. Apply execution", apply_gate_error)
+        report.add("BLOCKED", "L. Apply execution", apply_gate_error)
         return
     if token is None:
         report.add(
             "BLOCKED",
-            "K. Apply execution",
+            "L. Apply execution",
             "Zoho authentication/read preflight did not produce a usable access token",
         )
         return
@@ -1297,7 +1703,7 @@ def execute_apply_mode(
             selected_task_key=args.task_key,
         )
     except ApplyBlocked as exc:
-        report.add("BLOCKED", "K. Apply execution", str(exc))
+        report.add("BLOCKED", "L. Apply execution", str(exc))
         return
 
     assert selected_decision is not None
@@ -1310,15 +1716,15 @@ def execute_apply_mode(
     )
     for index, message in enumerate(plan_messages):
         label = "WARN" if index == 3 else "INFO"
-        report.add(label, "K. Apply plan", message)
+        report.add(label, "L. Apply plan", message)
         print(f"[{label}] {message}")
     print(f"[INFO] explicit apply confirmation accepted for {args.task_key}")
     try:
         assert selected_task is not None
         apply_one_task(report, env, token, selected_task, selected_decision)
-        report.add("SUCCESS", "K. Apply execution", f"controlled apply completed for {args.task_key}")
+        report.add("SUCCESS", "L. Apply execution", f"controlled apply completed for {args.task_key}")
     except ApplyBlocked as exc:
-        report.add("BLOCKED", "K. Apply execution", str(exc))
+        report.add("BLOCKED", "L. Apply execution", str(exc))
 
 
 def main() -> int:
@@ -1341,6 +1747,13 @@ def main() -> int:
         token=zoho_result.token,
     )
     decision_groups = group_decisions(decisions)
+    issue_findings = evaluate_issue_actions(
+        tagged_tasks=zoho_result.tagged_tasks,
+        decisions=decisions,
+        mappings=mapping_result.entries,
+        env=zoho_result.env,
+        github_state=github_result.state,
+    )
 
     add_summary_sections(
         report,
@@ -1349,6 +1762,7 @@ def main() -> int:
         untagged_count=zoho_result.untagged_count,
         decision_groups=decision_groups,
         mapping_findings=mapping_result.findings,
+        issue_findings=issue_findings,
     )
     add_integration_sections(
         report,
@@ -1360,8 +1774,8 @@ def main() -> int:
         comments_checked=comments_checked,
     )
     if not args.apply:
-        report.add("INFO", "J. No-write confirmation", "dry-run mode executed no GitHub create, Git push, Zoho write-back, repository initialization, scheduler edit, or service-control action")
-        report.add("SUCCESS", "J. No-write confirmation", "no GitHub repositories, commits, pushes, Zoho comments, Zoho task updates, local repositories, mappings, or scheduler changes were created")
+        report.add("INFO", "K. No-write confirmation", "dry-run mode executed no GitHub create, Git push, Zoho write-back, repository initialization, scheduler edit, or service-control action")
+        report.add("SUCCESS", "K. No-write confirmation", "no GitHub repositories, commits, pushes, Zoho comments, Zoho task updates, local repositories, mappings, or scheduler changes were created")
     else:
         execute_apply_mode(
             report,
