@@ -28,6 +28,7 @@ LABELS = ("SUCCESS", "WARN", "ERROR", "INFO", "SKIPPED", "BLOCKED")
 HOME = Path("/Users/blakeallard")
 PROJECT_DIR = Path(__file__).resolve().parent
 REPORT_DIR = PROJECT_DIR / "reports"
+TEMPLATE_DIR = PROJECT_DIR / "templates/repo"
 SOURCE_ENV_FILE = HOME / "bevco/scripts/zoho_projects_to_cliq/.env"
 SOURCE_TOKEN_CACHE = HOME / "bevco/scripts/zoho_projects_to_cliq/zoho_access_token_cache.json"
 LOCAL_REPO_ROOT = HOME / "bevco/repos"
@@ -517,7 +518,22 @@ def sanitize_metadata(value: Any, key_name: str = "") -> Any:
     return value
 
 
-def starter_file_contents(task: dict[str, Any], decision: Decision, repo_url: str) -> dict[str, str]:
+def load_template(relative_name: str) -> str:
+    path = TEMPLATE_DIR / relative_name
+    try:
+        return path.read_text()
+    except OSError as exc:
+        raise ApplyBlocked(f"starter template is unreadable: {path}: {exc}") from None
+
+
+def render_template(relative_name: str, context: dict[str, str]) -> str:
+    content = load_template(relative_name)
+    for key, value in context.items():
+        content = content.replace(f"{{{{{key}}}}}", value)
+    return content
+
+
+def starter_template_context(task: dict[str, Any], decision: Decision, repo_url: str) -> dict[str, str]:
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     description_html = str(task.get("description") or "")
     description = plain_text(description_html) or "No task description was provided."
@@ -527,99 +543,41 @@ def starter_file_contents(task: dict[str, Any], decision: Decision, repo_url: st
     task_url = str(task.get("url") or task.get("web_url") or task.get("task_url") or "")
     purpose = description[:800]
     marker = f"Zoho Task ID: {decision.task_id}"
-    readme = f"""# {decision.task_key}: {decision.title}
-
-{marker}
-
-## Purpose
-
-{purpose}
-
-## Task metadata
-
-- Task key: `{decision.task_key}`
-- Title: {decision.title}
-- Zoho task ID: `{decision.task_id}`
-- Status: {status}
-- Source system: Zoho Projects
-- Repository: {repo_url}
-
-## Repository structure
-
-- `TASK.md`: source task metadata and description
-- `docs/`: documentation and deliverables
-- `scripts/`: task-specific implementation
-- `artifacts/`: approved supporting artifacts
-
-Do not commit credentials, `.env` files, private tokens, or credential-bearing URLs.
-"""
-    task_md = f"""# {decision.task_key}: {decision.title}
-
-{marker}
-
-## Metadata
-
-- Task key: `{decision.task_key}`
-- Immutable task ID: `{decision.task_id}`
-- Title: {decision.title}
-- Status: {status}
-- Owner: {owner}
-- Tags: {', '.join(tags) if tags else 'None'}
-- Zoho task URL: {task_url or 'Not provided'}
-- Repository URL: {repo_url}
-- Generated at: {generated_at}
-
-## Description
-
-{description}
-
-## Sanitized Zoho API metadata
-
-```json
-{json.dumps(sanitize_metadata(task), indent=2, ensure_ascii=False)}
-```
-"""
-    claude_md = f"""# Claude Instructions
-
-{marker}
-
-- Scope all work to `{decision.task_key}` and this repository.
-- Read `README.md` and `TASK.md` before changing files.
-- Never expose secrets, tokens, `.env` contents, or private customer data.
-- Do not push directly to the default branch without explicit approval.
-- Keep implementation in `scripts/`, documentation in `docs/`, and approved supporting files in `artifacts/`.
-
-Template reuse from `zoho_task_folder_sync.py` is deferred for this MVP to avoid modifying or importing the active automation.
-"""
-    agents_md = f"""# Agent Instructions
-
-{marker}
-
-- Treat `TASK.md` as the source-task snapshot.
-- Make bounded, reviewable changes and document assumptions.
-- Do not commit credentials, generated caches, logs, or local state.
-- Do not delete or rewrite existing work without explicit approval.
-- Record verification commands and results in the relevant handoff or pull request.
-
-Shared template extraction from `zoho_task_folder_sync.py` is deferred pending separate approval.
-"""
-    gitignore = """.env
-.env.*
-!.env.example
-.DS_Store
-__pycache__/
-*.py[cod]
-*.log
-node_modules/
-.venv/
-venv/
-"""
     return {
-        "README.md": readme,
-        "TASK.md": task_md,
-        "CLAUDE.md": claude_md,
-        "AGENTS.md": agents_md,
-        ".gitignore": gitignore,
+        "TASK_KEY": decision.task_key,
+        "TASK_TITLE": decision.title,
+        "TASK_ID": decision.task_id,
+        "TASK_MARKER": marker,
+        "PURPOSE": purpose,
+        "TASK_STATUS": status,
+        "TASK_OWNER": owner,
+        "TASK_TAGS": ", ".join(tags) if tags else "None",
+        "TASK_URL": task_url or "Not provided",
+        "REPO_URL": repo_url,
+        "GENERATED_AT": generated_at,
+        "DESCRIPTION": description,
+        "SANITIZED_METADATA_JSON": json.dumps(
+            sanitize_metadata(task), indent=2, ensure_ascii=False
+        ),
+    }
+
+
+def starter_file_contents(task: dict[str, Any], decision: Decision, repo_url: str) -> dict[str, str]:
+    context = starter_template_context(task, decision, repo_url)
+    return {
+        "README.md": render_template("README.md.tmpl", context),
+        "TASK.md": render_template("TASK.md.tmpl", context),
+        "STATUS.md": render_template("STATUS.md.tmpl", context),
+        "AGENTS.md": render_template("AGENTS.md.tmpl", context),
+        "CLAUDE.md": render_template("CLAUDE.md.tmpl", context),
+        "CODEX.md": render_template("CODEX.md.tmpl", context),
+        ".gitignore": load_template(".gitignore.tmpl"),
+        ".github/ISSUE_TEMPLATE/zoho-task.md": render_template(
+            ".github/ISSUE_TEMPLATE/zoho-task.md.tmpl", context
+        ),
+        ".github/PULL_REQUEST_TEMPLATE.md": render_template(
+            ".github/PULL_REQUEST_TEMPLATE.md.tmpl", context
+        ),
         "docs/.gitkeep": "",
         "scripts/.gitkeep": "",
         "artifacts/.gitkeep": "",
@@ -700,6 +658,12 @@ def ensure_local_files(local_path: Path, task: dict[str, Any], decision: Decisio
         raise ApplyBlocked(f"refusing unsafe local repository path: {local_path}")
     local_path.mkdir(mode=0o700, parents=False, exist_ok=True)
     contents = starter_file_contents(task, decision, repo_url)
+    preserve_if_present = {
+        "STATUS.md",
+        "CODEX.md",
+        ".github/ISSUE_TEMPLATE/zoho-task.md",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+    }
     for relative_name, content in contents.items():
         path = local_path / relative_name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -711,6 +675,8 @@ def ensure_local_files(local_path: Path, task: dict[str, Any], decision: Decisio
                 if existing != content:
                     raise ApplyBlocked(f"existing file differs; refusing overwrite: {path}")
             elif relative_name.endswith(".gitkeep"):
+                continue
+            elif relative_name in preserve_if_present:
                 continue
             elif decision.task_id not in existing:
                 raise ApplyBlocked(f"existing file lacks approved task identity; refusing overwrite: {path}")
@@ -760,7 +726,19 @@ def ensure_origin(local_path: Path, repo_name: str) -> None:
 
 
 def commit_and_push(local_path: Path, task_key: str) -> None:
-    paths = ["README.md", "TASK.md", "CLAUDE.md", "AGENTS.md", ".gitignore", "docs", "scripts", "artifacts"]
+    paths = [
+        "README.md",
+        "TASK.md",
+        "STATUS.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CODEX.md",
+        ".gitignore",
+        ".github",
+        "docs",
+        "scripts",
+        "artifacts",
+    ]
     result = run_process(["git", "add", "--", *paths], local_path)
     require_command_success(result, "git add starter files")
     staged = run_process(["git", "diff", "--cached", "--quiet"], local_path)
