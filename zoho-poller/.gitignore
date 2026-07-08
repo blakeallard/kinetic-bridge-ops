@@ -4,3 +4,4 @@ poll.log
 poll_error.log
 new_task_alerts.md
 last_seen_tasks.json
+new_tasks.json

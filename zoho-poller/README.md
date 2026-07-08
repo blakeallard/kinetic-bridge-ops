@@ -48,14 +48,43 @@ crontab -e
 
 This runs every 30 minutes, 9am–6pm, Monday–Friday.
 
+## Piece 3 — Local task workspace sync (`sync_local_task_workspaces.py`)
+
+**Lives in:** the same `bevco-zoho-poller` folder, runs automatically at the end of `run_poll.sh`
+**Runs:** every time the poller runs (every 30 min, scheduled via the existing cron entry — no scheduler changes needed)
+
+What it does:
+1. Reads `new_tasks.json` (written by `bevco_task_poller.py` on every run — the raw list of tasks detected as new *this run*, `[]` if none)
+2. For each new task, creates or updates a local folder under `/Users/blakeallard/bevco/task-workspaces/<task-key>-<slug>/` (override with `--workspace-root`)
+3. Writes `.zoho_task_metadata.json` (task id, key, name, project, portal, status, owner, timestamps, description, Zoho link) — safe to overwrite every sync
+4. Writes/refreshes `HANDOFF.md` — an auto-generated header (task summary + metadata table) inside `<!-- zoho-sync:start/end -->` markers, so any manual notes you add below the markers survive future resyncs
+
+This is a pure local file operation — no Zoho API calls, no credentials, no Cliq notifications. It never touches WorkDrive sync, the GitHub repo-lifecycle tool, or `bevco/repos/`.
+
+### Manual test
+
+```bash
+cd bevco-zoho-poller
+python3 sync_local_task_workspaces.py --input new_tasks.json --dry-run   # preview only
+python3 sync_local_task_workspaces.py --input new_tasks.json            # apply
+```
+
+To test against a specific task without waiting for a real new one, hand-build a small JSON list (an array of raw Zoho task objects, same shape as entries in `tasks_latest.json`'s `data.tasks`) and pass it via `--input`.
+
+### Recovery
+
+- **Workspace folders are never auto-deleted or moved.** If a sync fails partway, rerun `sync_local_task_workspaces.py` against the same `new_tasks.json` — it's idempotent (matches existing folders by stored `task_id`, falls back to task-key prefix) and won't duplicate a folder.
+- To force a clean metadata rewrite for one task, delete that task's `.zoho_task_metadata.json` and rerun — `HANDOFF.md`'s manual content (anything below the `zoho-sync:end` marker) is untouched either way.
+- If `run_poll.sh` logs `[WARN] Local task workspace sync failed`, the poller's detection/alert step already succeeded — check the workspace-sync output above that line in `poll.log` for the actual error. A sync failure never blocks or invalidates task detection.
+
 ## The full loop, end to end
 
-1. **(Code, scheduled)** Poller detects a new task → writes alert → you see it next time you check `new_task_alerts.md` or your terminal/log
-2. **(You)** Copy the task block from the alert, paste into Claude Chat
-3. **(Chat, automatic)** Skill fires → worksheet filled → tier classified → checks in with you
-4. **(You)** Confirm or correct
-5. **(Chat)** Drafts the deliverable
-6. **(You, or Code)** If the deliverable requires actual Zoho writes, hand the spec to Claude Code to execute; if it's a document/diagram, it's already done
+1. **(Code, scheduled)** Poller detects a new task → `new_tasks.json` is written → a local task workspace is created/synced under `/Users/blakeallard/bevco/task-workspaces/<task-key>-<slug>/`
+2. **(You, or Claude/Codex directly)** Open/`cd` into that workspace — `HANDOFF.md` is the starting context: task summary, metadata table, and Zoho link, ready for Claude/Codex to pick up immediately
+3. **(Optional)** If you want the worksheet/tier-classification flow, paste the task content into Claude Chat — the `bevco-task-intake` skill fills the diagnostic worksheet, classifies the tier, and checks in with you before drafting a deliverable
+4. **(You, or Code)** If the deliverable requires actual Zoho writes, hand the spec to Claude Code to execute; if it's a document/diagram, it's already done
+
+`new_task_alerts.md` is still written every run a new task is found — keep it as a fallback/manual visibility feed (glance at what's new without opening a workspace), but it is **not** the primary handoff mechanism anymore; the local workspace + `HANDOFF.md` is.
 
 ## Notes
 

@@ -35,6 +35,7 @@ from pathlib import Path
 
 DEFAULT_STATE_FILE = "last_seen_tasks.json"
 DEFAULT_ALERT_FILE = "new_task_alerts.md"
+DEFAULT_NEW_TASKS_FILE = "new_tasks.json"
 
 
 def load_state(state_path: Path) -> dict:
@@ -118,6 +119,11 @@ def main():
     parser.add_argument(
         "--alert-out", default=DEFAULT_ALERT_FILE, help="Path to write the alert markdown file"
     )
+    parser.add_argument(
+        "--new-tasks-out",
+        default=DEFAULT_NEW_TASKS_FILE,
+        help="Path to write the raw JSON list of newly-detected tasks (always written, even if empty)",
+    )
     args = parser.parse_args()
 
     if args.input == "-":
@@ -138,6 +144,10 @@ def main():
     current_ids = {t.get("id") for t in tasks if t.get("id")}
     new_ids = current_ids - seen_ids
     new_tasks = [t for t in tasks if t.get("id") in new_ids]
+
+    # Raw (unstripped) task objects for downstream local-workspace sync.
+    # Always written, even when empty, so consumers get a fresh signal each run.
+    Path(args.new_tasks_out).write_text(json.dumps(new_tasks, indent=2))
 
     if new_tasks:
         alert_md = format_alert(new_tasks)

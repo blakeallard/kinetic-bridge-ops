@@ -83,4 +83,9 @@ PY
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Running diff against last_seen_tasks.json..."
 python3 bevco_task_poller.py --input "${TASKS_JSON}"
 
+echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Syncing local task workspaces for new tasks..."
+python3 sync_local_task_workspaces.py --input new_tasks.json || {
+  echo "[WARN] Local task workspace sync failed — new tasks were still detected above. See output for details."
+}
+
 echo "Done."
