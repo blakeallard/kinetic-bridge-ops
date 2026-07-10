@@ -1,6 +1,6 @@
 # Zoho Task to GitHub Repo Lifecycle Dry-Run MVP
 
-This project performs read-only reconciliation by default for Zoho tasks explicitly tagged `repo-needed`. A controlled apply path exists only for the approved task `BI1-T71` and requires two matching command-line confirmation values.
+This project performs read-only reconciliation by default for Zoho tasks explicitly tagged `repo-needed`. A controlled apply path exists for one eligible `repo-needed` task per run and requires two matching command-line confirmation values naming that task key.
 
 ## Data sources
 
@@ -21,7 +21,7 @@ Dry-run remains the default. It performs no GitHub, Git, mapping, or Zoho writes
 
 ## Controlled apply mode
 
-Apply mode is hard-limited to `BI1-T71`. It refuses missing or different task keys, requires the exact `repo-needed` tag, reruns all duplicate and metadata checks, and requires a second matching confirmation token.
+Apply mode processes exactly one task per run: the task named by `--task-key` must appear as `would-create` (or safe existing-resume) in the same run's dry-run decisions, carry the exact `repo-needed` tag, pass all duplicate and metadata checks, and be confirmed a second time via `--confirm-apply`. (The original BI1-T71-only hard lock has been generalized; BI1-T71 below is an example.)
 
 After reviewing a fresh dry-run, the separately approved command is:
 
@@ -53,7 +53,7 @@ Tasks without the exact `repo-needed` tag are counted and skipped without per-ta
 ## Safety
 
 - Dry-run reports are the only default runtime writes.
-- Apply mode cannot process any task except `BI1-T71` and cannot run without both confirmation arguments.
+- Apply mode cannot process more than one task per run, only a task eligible in the same run's decisions, and cannot run without both matching confirmation arguments.
 - GitHub repositories are created with explicit private visibility only.
 - No delete, public-visibility, force-push, history-rewrite, scheduler, or service-control operation is implemented.
 - Secrets and full environment values are never printed.
