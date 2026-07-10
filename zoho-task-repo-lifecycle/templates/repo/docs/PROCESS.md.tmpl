@@ -1,0 +1,64 @@
+# {{TASK_KEY}} Process
+
+{{TASK_MARKER}}
+
+## Project Identity
+
+- Task key: `{{TASK_KEY}}`
+- Zoho task ID: `{{TASK_ID}}`
+- Task title: {{TASK_TITLE}}
+- Current Zoho status: {{TASK_STATUS}}
+- Repository URL: {{REPO_URL}}
+- Canonical repository path: `{{CANONICAL_REPO_PATH}}`
+- Generated at: {{GENERATED_AT}}
+
+## Purpose
+
+{{PURPOSE}}
+
+## Source-of-Truth Files
+
+- `README.md` for the repo purpose and high-level structure
+- `TASK.md` for the imported Zoho task snapshot and sanitized metadata
+- `STATUS.md` for current implementation status and next decisions
+- `docs/PROCESS.md` for persistent workflow expectations
+- `docs/CURRENT_HANDOFF.md` for active handoff history and next-step context
+- `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, and `.github/copilot-instructions.md` for agent behavior
+
+## Workflow Expectations
+
+1. Read `README.md`, `TASK.md`, `STATUS.md`, and `docs/CURRENT_HANDOFF.md` before changing files.
+2. Use repository evidence before assumptions; confirm behavior from source, tests, logs, or validated outputs.
+3. Keep changes bounded, reviewable, and scoped to this repository.
+4. Record meaningful decisions, validation results, and follow-up context in the handoff/history files instead of relying on chat memory alone.
+
+## Validation
+
+- Run the project-specific validators, tests, or dry-runs that already exist before stopping.
+- Capture the exact commands and outcome summary in the active handoff or PR notes.
+- If no automated validator exists yet, state that explicitly and verify the changed paths manually.
+
+## Approval Boundaries
+
+- Do not modify Zoho runtime systems, Creator, CRM, Books, Flow, Sheet, or WorkDrive unless explicitly approved.
+- Do not create or modify production data, deployments, or external automations without explicit approval.
+- Do not commit, push, open a PR, merge, or change GitHub settings unless explicitly approved.
+
+## Git / GitHub Rules
+
+- Work from this repository only.
+- Preserve uncommitted and untracked work you did not create.
+- Prefer small, reviewable diffs and avoid rewriting unrelated history.
+- Treat generated caches, logs, local state, and secret-bearing files as non-committable unless policy changes are explicitly documented.
+
+## Production Safety Rules
+
+- Never expose secrets, tokens, `.env` contents, private customer data, or credential-bearing URLs.
+- Default to read-only investigation first when behavior is uncertain.
+- Escalate any requirement for live-system changes, data repair, or cross-repo coordination before acting.
+
+## Handoff Expectations
+
+- Keep `docs/CURRENT_HANDOFF.md` current at the end of meaningful work.
+- Preserve prior handoff rounds; add new dated entries instead of deleting history.
+- Call out blockers, validation performed, unresolved risks, and the single recommended next task.

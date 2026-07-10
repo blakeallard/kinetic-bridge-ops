@@ -32,7 +32,7 @@ python3 repo_lifecycle_dry_run.py \
   --confirm-apply BI1-T71
 ```
 
-The apply path creates or verifies only the expected local repository, creates or verifies a private GitHub repository, commits and pushes starter files, atomically records `task_repo_map.json`, and posts one idempotent Zoho comment. Existing or partial state is verified before continuation; conflicting files, remotes, mappings, repository visibility, or task metadata block execution.
+The apply path creates or verifies only the expected local repository, creates or verifies a private GitHub repository, commits and pushes starter files, atomically records `task_repo_map.json`, and posts one idempotent Zoho comment. Starter files include the core coordination set plus `docs/PROCESS.md`, `docs/CURRENT_HANDOFF.md`, and `.github/copilot-instructions.md`. Existing or partial state is verified before continuation; conflicting files, remotes, mappings, repository visibility, or task metadata block execution.
 
 Shared `CLAUDE.md` and `AGENTS.md` template extraction from the active folder-sync automation is intentionally deferred. Apply mode generates conservative starter versions instead and reports the deferral.
 

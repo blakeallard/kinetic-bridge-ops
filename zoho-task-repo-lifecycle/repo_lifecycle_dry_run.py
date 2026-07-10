@@ -714,6 +714,7 @@ def starter_template_context(task: dict[str, Any], decision: Decision, repo_url:
         "TASK_TAGS": ", ".join(tags) if tags else "None",
         "TASK_URL": task_url or "Not provided",
         "REPO_URL": repo_url,
+        "CANONICAL_REPO_PATH": str(LOCAL_REPO_ROOT / decision.repo_name),
         "GENERATED_AT": generated_at,
         "DESCRIPTION": description,
         "SANITIZED_METADATA_JSON": json.dumps(
@@ -731,7 +732,12 @@ def starter_file_contents(task: dict[str, Any], decision: Decision, repo_url: st
         "AGENTS.md": render_template("AGENTS.md.tmpl", context),
         "CLAUDE.md": render_template("CLAUDE.md.tmpl", context),
         "CODEX.md": render_template("CODEX.md.tmpl", context),
+        "docs/PROCESS.md": render_template("docs/PROCESS.md.tmpl", context),
+        "docs/CURRENT_HANDOFF.md": render_template("docs/CURRENT_HANDOFF.md.tmpl", context),
         ".gitignore": load_template(".gitignore.tmpl"),
+        ".github/copilot-instructions.md": render_template(
+            ".github/copilot-instructions.md.tmpl", context
+        ),
         ".github/ISSUE_TEMPLATE/zoho-task.md": render_template(
             ".github/ISSUE_TEMPLATE/zoho-task.md.tmpl", context
         ),

@@ -50,7 +50,7 @@
 1. **GitHub repository** — Private repo created in `blake-bevco-tech` org (or GITHUB_ORG override)
    - Name: Task key + slug (e.g., `bi1-t71-...`)
    - Visibility: Private
-   - Starter files: README.md, TASK.md, STATUS.md, AGENTS.md, CLAUDE.md, .gitignore
+   - Starter files: README.md, TASK.md, STATUS.md, AGENTS.md, CLAUDE.md, CODEX.md, `docs/PROCESS.md`, `docs/CURRENT_HANDOFF.md`, `.github/copilot-instructions.md`, and `.gitignore`
 2. **`task_repo_map.json`** — Updated local state mapping task → repo (atomically written)
 3. **Zoho task comment** — Idempotent comment posted to task with GitHub repo link
 4. **`reports/repo_lifecycle_apply_YYYY-MM-DD.md`** — Apply report
@@ -92,7 +92,7 @@ repo_lifecycle_dry_run.py
       ├─ Verify: Both confirmation args match task key
       ├─ Create: GitHub private repo in blake-bevco-tech org
       ├─ Clone: Repo locally to /Users/blakeallard/bevco/repos/
-      ├─ Add: Starter files (README.md, TASK.md, CLAUDE.md, etc. from templates/)
+      ├─ Add: Starter files (README.md, TASK.md, docs/PROCESS.md, docs/CURRENT_HANDOFF.md, agent instructions, etc. from templates/)
       ├─ Git: Commit + push (atomic)
       ├─ Update: task_repo_map.json (atomically)
       ├─ Post: Idempotent Zoho comment with GitHub link
