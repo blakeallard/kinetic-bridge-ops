@@ -32,9 +32,9 @@ python3 repo_lifecycle_dry_run.py \
   --confirm-apply BI1-T71
 ```
 
-The apply path creates or verifies only the expected local repository, creates or verifies a private GitHub repository, commits and pushes starter files, atomically records `task_repo_map.json`, and posts one idempotent Zoho comment. Starter files include the core coordination set plus `docs/PROCESS.md`, `docs/CURRENT_HANDOFF.md`, and `.github/copilot-instructions.md`. Existing or partial state is verified before continuation; conflicting files, remotes, mappings, repository visibility, or task metadata block execution.
+The apply path creates or verifies only the expected local repository, creates or verifies a private GitHub repository, commits and pushes starter files, atomically records `task_repo_map.json`, and posts one idempotent Zoho comment. The default starter package is intentionally minimal: `README.md`, `TASK.md`, `AGENTS.md`, `docs/CURRENT_HANDOFF.md`, `.gitignore`, the GitHub issue template, the pull request template, and empty `docs/`, `scripts/`, and `artifacts/` placeholders. Existing or partial state is verified before continuation; conflicting files, remotes, mappings, repository visibility, or task metadata block execution.
 
-Shared `CLAUDE.md` and `AGENTS.md` template extraction from the active folder-sync automation is intentionally deferred. Apply mode generates conservative starter versions instead and reports the deferral.
+Optional/manual add-ons such as `docs/PROCESS.md` and `.github/copilot-instructions.md` have preserved templates in this repo, but the automation does not generate them by default and does not expose a configuration switch for them today.
 
 The report is printed to the terminal and written to:
 
@@ -59,6 +59,7 @@ Tasks without the exact `repo-needed` tag are counted and skipped without per-ta
 - Secrets and full environment values are never printed.
 - The expected GitHub organization defaults to `blake-bevco-tech` and can be overridden with `GITHUB_ORG` for a future Kinetic Bridge organization.
 - Generated reports, local `.env`, runtime mapping state, and Python caches are ignored by Git.
+- Resume validation remains compatible with older repos that still use the larger legacy coordination-file set.
 
 ## task_repo_map.json
 

@@ -72,7 +72,15 @@ PROJECT_STATUS_OPTIONS = {
     "Blocker": "ba2eeecb",
     "Closed": "e7c555c4",
 }
-REQUIRED_COORDINATION_FILES = (
+MINIMAL_REQUIRED_COORDINATION_FILES = (
+    "README.md",
+    "TASK.md",
+    "AGENTS.md",
+    "docs/CURRENT_HANDOFF.md",
+    ".github/ISSUE_TEMPLATE/zoho-task.md",
+    ".github/PULL_REQUEST_TEMPLATE.md",
+)
+LEGACY_REQUIRED_COORDINATION_FILES = (
     "README.md",
     "TASK.md",
     "STATUS.md",
@@ -728,16 +736,9 @@ def starter_file_contents(task: dict[str, Any], decision: Decision, repo_url: st
     return {
         "README.md": render_template("README.md.tmpl", context),
         "TASK.md": render_template("TASK.md.tmpl", context),
-        "STATUS.md": render_template("STATUS.md.tmpl", context),
         "AGENTS.md": render_template("AGENTS.md.tmpl", context),
-        "CLAUDE.md": render_template("CLAUDE.md.tmpl", context),
-        "CODEX.md": render_template("CODEX.md.tmpl", context),
-        "docs/PROCESS.md": render_template("docs/PROCESS.md.tmpl", context),
         "docs/CURRENT_HANDOFF.md": render_template("docs/CURRENT_HANDOFF.md.tmpl", context),
         ".gitignore": load_template(".gitignore.tmpl"),
-        ".github/copilot-instructions.md": render_template(
-            ".github/copilot-instructions.md.tmpl", context
-        ),
         ".github/ISSUE_TEMPLATE/zoho-task.md": render_template(
             ".github/ISSUE_TEMPLATE/zoho-task.md.tmpl", context
         ),
@@ -1180,12 +1181,28 @@ def classify_existing_apply_state(task: dict[str, Any], decision: Decision) -> s
 
 
 def verify_existing_repo_files(local_path: Path) -> None:
-    missing = [relative_name for relative_name in REQUIRED_COORDINATION_FILES if not (local_path / relative_name).is_file()]
-    if missing:
-        raise ApplyBlocked(
-            "existing repository is missing required AI coordination files: "
-            + ", ".join(missing)
-        )
+    minimal_missing = [
+        relative_name
+        for relative_name in MINIMAL_REQUIRED_COORDINATION_FILES
+        if not (local_path / relative_name).is_file()
+    ]
+    if not minimal_missing:
+        return
+    legacy_missing = [
+        relative_name
+        for relative_name in LEGACY_REQUIRED_COORDINATION_FILES
+        if not (local_path / relative_name).is_file()
+    ]
+    if not legacy_missing:
+        return
+    raise ApplyBlocked(
+        "existing repository is missing required AI coordination files for both the minimal and legacy starter packages: "
+        + "minimal missing ["
+        + ", ".join(minimal_missing)
+        + "]; legacy missing ["
+        + ", ".join(legacy_missing)
+        + "]"
+    )
 
 
 def ensure_local_files(local_path: Path, task: dict[str, Any], decision: Decision, repo_url: str) -> None:
@@ -1194,8 +1211,6 @@ def ensure_local_files(local_path: Path, task: dict[str, Any], decision: Decisio
     local_path.mkdir(mode=0o700, parents=False, exist_ok=True)
     contents = starter_file_contents(task, decision, repo_url)
     preserve_if_present = {
-        "STATUS.md",
-        "CODEX.md",
         ".github/ISSUE_TEMPLATE/zoho-task.md",
         ".github/PULL_REQUEST_TEMPLATE.md",
     }

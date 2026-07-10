@@ -20,14 +20,14 @@
 
 - `README.md` for the repo purpose and high-level structure
 - `TASK.md` for the imported Zoho task snapshot and sanitized metadata
-- `STATUS.md` for current implementation status and next decisions
+- `AGENTS.md` for shared agent workflow, approval, validation, and handoff rules
 - `docs/PROCESS.md` for persistent workflow expectations
 - `docs/CURRENT_HANDOFF.md` for active handoff history and next-step context
-- `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, and `.github/copilot-instructions.md` for agent behavior
+- `.github/copilot-instructions.md` for optional Copilot-specific repo guidance when it is intentionally added
 
 ## Workflow Expectations
 
-1. Read `README.md`, `TASK.md`, `STATUS.md`, and `docs/CURRENT_HANDOFF.md` before changing files.
+1. Read `docs/CURRENT_HANDOFF.md`, `TASK.md`, `README.md`, and `AGENTS.md` before changing files.
 2. Use repository evidence before assumptions; confirm behavior from source, tests, logs, or validated outputs.
 3. Keep changes bounded, reviewable, and scoped to this repository.
 4. Record meaningful decisions, validation results, and follow-up context in the handoff/history files instead of relying on chat memory alone.

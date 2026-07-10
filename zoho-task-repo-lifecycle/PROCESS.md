@@ -50,7 +50,7 @@
 1. **GitHub repository** — Private repo created in `blake-bevco-tech` org (or GITHUB_ORG override)
    - Name: Task key + slug (e.g., `bi1-t71-...`)
    - Visibility: Private
-   - Starter files: README.md, TASK.md, STATUS.md, AGENTS.md, CLAUDE.md, CODEX.md, `docs/PROCESS.md`, `docs/CURRENT_HANDOFF.md`, `.github/copilot-instructions.md`, and `.gitignore`
+   - Starter files: README.md, TASK.md, AGENTS.md, `docs/CURRENT_HANDOFF.md`, `.gitignore`, `.github/ISSUE_TEMPLATE/zoho-task.md`, `.github/PULL_REQUEST_TEMPLATE.md`, plus empty `docs/`, `scripts/`, and `artifacts/` placeholders
 2. **`task_repo_map.json`** — Updated local state mapping task → repo (atomically written)
 3. **Zoho task comment** — Idempotent comment posted to task with GitHub repo link
 4. **`reports/repo_lifecycle_apply_YYYY-MM-DD.md`** — Apply report
@@ -92,7 +92,7 @@ repo_lifecycle_dry_run.py
       ├─ Verify: Both confirmation args match task key
       ├─ Create: GitHub private repo in blake-bevco-tech org
       ├─ Clone: Repo locally to /Users/blakeallard/bevco/repos/
-      ├─ Add: Starter files (README.md, TASK.md, docs/PROCESS.md, docs/CURRENT_HANDOFF.md, agent instructions, etc. from templates/)
+      ├─ Add: Minimal starter files (README.md, TASK.md, AGENTS.md, docs/CURRENT_HANDOFF.md, GitHub templates, and placeholders from templates/)
       ├─ Git: Commit + push (atomic)
       ├─ Update: task_repo_map.json (atomically)
       ├─ Post: Idempotent Zoho comment with GitHub link
@@ -122,6 +122,7 @@ repo_lifecycle_dry_run.py
   - Processes exactly one task per run
   - Task must be eligible in the same run's dry-run decisions
  - Applies only to `would-create` or verified safe `existing` resume decisions; conflicting state blocks execution
+ - Existing repos may satisfy either the current minimal coordination-file set or the legacy larger coordination-file set
 - **Writes:**
   - GitHub: Creates private repo
   - Local: Clones repo, commits starter files, pushes
@@ -242,6 +243,7 @@ gh repo list blake-bevco-tech
 - **Explicit confirmation:** `--confirm-apply` must match `--task-key` exactly
 - **Secrets never printed:** No credentials, tokens, or secrets in reports or stdout
 - **Template inheritance:** Conservative starter files generated in apply; shared template reuse deferred per architecture decision
+- **Optional templates:** `docs/PROCESS.md` and `.github/copilot-instructions.md` templates are preserved in this repo for manual use, but no optional-generation switch is implemented today
 
 ---
 
@@ -250,7 +252,7 @@ gh repo list blake-bevco-tech
 - **No scheduler:** This automation requires human approval. Do not add to cron/launchd without explicit permission.
 - **Git-ignored state:** `task_repo_map.json` is not committed; it's local reconciliation cache. GitHub + Zoho are canonical sources of truth.
 - **Idempotent Zoho comments:** Posting the same comment twice is safe (script prevents duplicate links).
-- **Template deferral:** CLAUDE.md and AGENTS.md extraction from zoho-task-folder-sync is intentionally deferred. Conservative starter versions are generated during apply.
+- **Template deferral:** Shared template extraction from zoho-task-folder-sync is intentionally deferred. The current apply path generates a minimal default package instead.
 
 ---
 
@@ -259,7 +261,7 @@ gh repo list blake-bevco-tech
 - **Credential source:** `/Users/blakeallard/bevco/scripts/zoho_projects_to_cliq/.env`
 - **Token cache:** `/Users/blakeallard/bevco/scripts/zoho_projects_to_cliq/zoho_access_token_cache.json` (read-only)
 - **Mapping state:** `./task_repo_map.json` (local git-ignored)
-- **Starter templates:** `./templates/repo/` (README.md, TASK.md, CLAUDE.md, AGENTS.md, etc.)
+- **Starter templates:** `./templates/repo/` (minimal defaults plus preserved optional/legacy templates)
 - **Reports:** `./reports/` (dry-run + apply reports)
 - **Local repos:** `/Users/blakeallard/bevco/repos/` (where cloned repos are stored)
 - **Upstream:** `bevco-zoho-poller` (detects new tasks + repo-needed tag); this tool processes tagged tasks

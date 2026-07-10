@@ -6,21 +6,25 @@
 
 {{PURPOSE}}
 
-## Task metadata
+## Project Overview
 
 - Task key: `{{TASK_KEY}}`
 - Title: {{TASK_TITLE}}
 - Zoho task ID: `{{TASK_ID}}`
-- Status: {{TASK_STATUS}}
 - Source system: Zoho Projects
 - Repository: {{REPO_URL}}
 
-## Repository structure
+## Getting Started
+
+1. Read `TASK.md` for the imported task scope, metadata, and boundaries.
+2. Read `AGENTS.md` for agent workflow, approval, validation, and handoff rules.
+3. Read `docs/CURRENT_HANDOFF.md` for the active state of the repo before changing files.
+
+## High-Level Architecture
 
 - `TASK.md`: source task metadata and description
-- `STATUS.md`: current status, decisions, and handoff notes
+- `AGENTS.md`: shared execution rules for coding agents working in this repo
+- `docs/CURRENT_HANDOFF.md`: current state, round history, blockers, and next step
 - `docs/`: documentation and deliverables
 - `scripts/`: task-specific implementation
 - `artifacts/`: approved supporting artifacts
-
-Do not commit credentials, `.env` files, private tokens, private customer data, or credential-bearing URLs.

@@ -8,12 +8,12 @@
 - Add new dated rounds without deleting prior history.
 - Preserve parallel-agent work, uncommitted changes, and approved artifacts unless explicitly told otherwise.
 
-## Current Project State
+## Current State
 
 - Repository initialized for `{{TASK_KEY}}`.
 - Task snapshot exists in `TASK.md`.
-- Workflow expectations exist in `docs/PROCESS.md`.
-- No implementation-specific history has been recorded yet.
+- Shared agent workflow rules exist in `AGENTS.md`.
+- No implementation-specific history has been recorded yet beyond bootstrap.
 
 ## Completed Work
 
@@ -36,14 +36,15 @@
 
 ## Recommended Next Task
 
-1. Read `README.md`, `TASK.md`, `STATUS.md`, and `docs/PROCESS.md`.
+1. Read `TASK.md`, `README.md`, and `AGENTS.md`.
 2. Inspect the current working tree and existing artifacts before changing anything.
 3. Confirm the next concrete implementation or research step from repository evidence.
 
-## Session Handoff Rules
+## Round History
 
-- Read this file first in every new session.
-- Append or prepend new dated rounds; do not erase earlier context.
-- Preserve parallel-agent work and explicitly note ownership collisions.
-- Do not guess about runtime behavior, production state, or approvals.
-- Do not touch production systems or live Zoho/GitHub state without explicit approval.
+### Round 1 — Bootstrap
+
+- Completed: repository scaffold generated from the Zoho task import.
+- Validation: no task-specific validation recorded yet.
+- Blockers: none recorded at bootstrap time.
+- Next: inspect the repo state, confirm scope from `TASK.md`, and record the first real work round here.
