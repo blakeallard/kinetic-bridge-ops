@@ -1,0 +1,31 @@
+name: Sync commits to Zoho Projects
+
+on:
+  push:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: zoho-commit-sync-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync-zoho-task-comments:
+    name: Sync Zoho task comments
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Send pushed commits to Zoho Flow
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ZOHO_COMMIT_SYNC_WEBHOOK_URL: ${{ secrets.ZOHO_COMMIT_SYNC_WEBHOOK_URL }}
+        run: >-
+          python scripts/sync_commits_to_zoho.py
+          --event "$GITHUB_EVENT_PATH"
+          --mapping .zoho-project-task.json

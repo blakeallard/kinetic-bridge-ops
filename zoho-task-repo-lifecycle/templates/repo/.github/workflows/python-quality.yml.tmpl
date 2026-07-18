@@ -1,0 +1,54 @@
+name: Python quality
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install project and quality dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install pytest ruff
+          if [[ -f requirements.txt ]]; then
+            python -m pip install -r requirements.txt
+          fi
+      - name: Compile Python sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find . -type f -name '*.py' -not -path './.git/*' -not -path './.venv/*' -not -path './venv/*')
+          if (( ${#files[@]} )); then
+            python -m py_compile "${files[@]}"
+          else
+            echo "No Python files found; compilation skipped."
+          fi
+      - name: Run Ruff
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find . -type f -name '*.py' -not -path './.git/*' | grep -q .; then
+            python -m ruff check .
+          else
+            echo "No Python files found; Ruff skipped."
+          fi
+      - name: Run tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d tests ]] && find tests -type f \( -name 'test_*.py' -o -name '*_test.py' \) | grep -q .; then
+            python -m pytest -ra
+          else
+            echo "No Python tests found; pytest skipped."
+          fi

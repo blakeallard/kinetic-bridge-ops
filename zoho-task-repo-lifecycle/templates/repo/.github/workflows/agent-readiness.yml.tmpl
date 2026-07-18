@@ -1,0 +1,27 @@
+name: Agent readiness
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-agent-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify AI-agent repository contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(README.md TASK.md STATUS.md AGENTS.md CLAUDE.md CODEX.md)
+          directories=(docs scripts artifacts)
+          for path in "${files[@]}"; do
+            [[ -f "$path" ]] || { echo "::error file=$path::Missing required agent file"; exit 1; }
+          done
+          for path in "${directories[@]}"; do
+            [[ -d "$path" ]] || { echo "::error file=$path::Missing required agent directory"; exit 1; }
+          done
+          echo "Agent-ready repository contract is intact."

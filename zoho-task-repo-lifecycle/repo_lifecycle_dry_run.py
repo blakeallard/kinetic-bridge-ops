@@ -34,6 +34,8 @@ SOURCE_TOKEN_CACHE = HOME / "bevco/scripts/zoho_projects_to_cliq/zoho_access_tok
 LOCAL_REPO_ROOT = HOME / "bevco/repos"
 GITHUB_ORG = os.environ.get("GITHUB_ORG", "blake-bevco-tech")
 APPROVAL_TAG = "repo-needed"
+LIFECYCLE_GENERATOR = "zoho-task-repo-lifecycle"
+LIFECYCLE_VERSION = "2"
 REQUIRED_ENV_NAMES = {
     "ZOHO_CLIENT_ID",
     "ZOHO_CLIENT_SECRET",
@@ -72,23 +74,40 @@ PROJECT_STATUS_OPTIONS = {
     "Blocker": "ba2eeecb",
     "Closed": "e7c555c4",
 }
-MINIMAL_REQUIRED_COORDINATION_FILES = (
-    "README.md",
-    "TASK.md",
-    "AGENTS.md",
-    "docs/CURRENT_HANDOFF.md",
-    ".github/ISSUE_TEMPLATE/zoho-task.md",
-    ".github/PULL_REQUEST_TEMPLATE.md",
-)
-LEGACY_REQUIRED_COORDINATION_FILES = (
+REQUIRED_GENERATED_FILES = (
     "README.md",
     "TASK.md",
     "STATUS.md",
     "AGENTS.md",
     "CLAUDE.md",
     "CODEX.md",
+    "docs/CURRENT_HANDOFF.md",
     ".github/ISSUE_TEMPLATE/zoho-task.md",
     ".github/PULL_REQUEST_TEMPLATE.md",
+    ".github/workflows/agent-readiness.yml",
+    ".github/workflows/python-quality.yml",
+    ".github/workflows/repository-validation.yml",
+    ".github/workflows/claude-context-check.yml",
+    ".github/workflows/issue-development.yml",
+    ".github/workflows/pr-validation.yml",
+    ".github/workflows/security.yml",
+    ".github/workflows/sync-commits-to-zoho.yml",
+    ".zoho-project-task.json",
+    "scripts/sync_commits_to_zoho.py",
+)
+REQUIRED_GENERATED_DIRECTORIES = (
+    "docs",
+    "scripts",
+    "artifacts",
+    ".github",
+    ".github/ISSUE_TEMPLATE",
+    ".github/workflows",
+)
+GENERATED_GIT_PATHS = REQUIRED_GENERATED_FILES + (
+    ".gitignore",
+    "docs/.gitkeep",
+    "scripts/.gitkeep",
+    "artifacts/.gitkeep",
 )
 
 
@@ -701,6 +720,26 @@ def render_template(relative_name: str, context: dict[str, str]) -> str:
     return content
 
 
+def extract_zoho_task_scope(task: dict[str, Any], expected_task_id: str) -> tuple[str, str]:
+    serialized = json.dumps(task, ensure_ascii=True)
+    matches = set(
+        re.findall(
+            r"projectsapi\.zoho\.com/restapi/portal/([^/\"?]+)/projects/([^/\"?]+)/tasks/([^/\"?]+)",
+            serialized,
+        )
+    )
+    matching_scopes = {
+        (portal_id, project_id)
+        for portal_id, project_id, task_id in matches
+        if task_id == str(expected_task_id)
+    }
+    if len(matching_scopes) != 1:
+        raise ApplyBlocked(
+            "Zoho task metadata must contain exactly one matching portal/project/task API scope"
+        )
+    return next(iter(matching_scopes))
+
+
 def starter_template_context(task: dict[str, Any], decision: Decision, repo_url: str) -> dict[str, str]:
     generated_at = datetime.now().astimezone().isoformat(timespec="seconds")
     description_html = str(task.get("description") or "")
@@ -711,11 +750,14 @@ def starter_template_context(task: dict[str, Any], decision: Decision, repo_url:
     task_url = str(task.get("url") or task.get("web_url") or task.get("task_url") or "")
     purpose = description[:800]
     marker = f"Zoho Task ID: {decision.task_id}"
+    portal_id, zoho_project_id = extract_zoho_task_scope(task, decision.task_id)
     return {
         "TASK_KEY": decision.task_key,
         "TASK_TITLE": decision.title,
         "TASK_ID": decision.task_id,
         "TASK_MARKER": marker,
+        "PORTAL_ID": portal_id,
+        "ZOHO_PROJECT_ID": zoho_project_id,
         "PURPOSE": purpose,
         "TASK_STATUS": status,
         "TASK_OWNER": owner,
@@ -733,10 +775,13 @@ def starter_template_context(task: dict[str, Any], decision: Decision, repo_url:
 
 def starter_file_contents(task: dict[str, Any], decision: Decision, repo_url: str) -> dict[str, str]:
     context = starter_template_context(task, decision, repo_url)
-    return {
+    rendered = {
         "README.md": render_template("README.md.tmpl", context),
         "TASK.md": render_template("TASK.md.tmpl", context),
+        "STATUS.md": render_template("STATUS.md.tmpl", context),
         "AGENTS.md": render_template("AGENTS.md.tmpl", context),
+        "CLAUDE.md": render_template("CLAUDE.md.tmpl", context),
+        "CODEX.md": render_template("CODEX.md.tmpl", context),
         "docs/CURRENT_HANDOFF.md": render_template("docs/CURRENT_HANDOFF.md.tmpl", context),
         ".gitignore": load_template(".gitignore.tmpl"),
         ".github/ISSUE_TEMPLATE/zoho-task.md": render_template(
@@ -745,10 +790,115 @@ def starter_file_contents(task: dict[str, Any], decision: Decision, repo_url: st
         ".github/PULL_REQUEST_TEMPLATE.md": render_template(
             ".github/PULL_REQUEST_TEMPLATE.md.tmpl", context
         ),
+        ".github/workflows/repository-validation.yml": load_template(
+            ".github/workflows/repository-validation.yml.tmpl"
+        ),
+        ".github/workflows/agent-readiness.yml": load_template(
+            ".github/workflows/agent-readiness.yml.tmpl"
+        ),
+        ".github/workflows/python-quality.yml": load_template(
+            ".github/workflows/python-quality.yml.tmpl"
+        ),
+        ".github/workflows/claude-context-check.yml": load_template(
+            ".github/workflows/claude-context-check.yml.tmpl"
+        ),
+        ".github/workflows/issue-development.yml": load_template(
+            ".github/workflows/issue-development.yml.tmpl"
+        ),
+        ".github/workflows/pr-validation.yml": load_template(
+            ".github/workflows/pr-validation.yml.tmpl"
+        ),
+        ".github/workflows/security.yml": load_template(
+            ".github/workflows/security.yml.tmpl"
+        ),
+        ".github/workflows/sync-commits-to-zoho.yml": load_template(
+            ".github/workflows/sync-commits-to-zoho.yml.tmpl"
+        ),
+        ".zoho-project-task.json": render_template(
+            ".zoho-project-task.json.tmpl", context
+        ),
+        "scripts/sync_commits_to_zoho.py": load_template(
+            "scripts/sync_commits_to_zoho.py.tmpl"
+        ),
         "docs/.gitkeep": "",
         "scripts/.gitkeep": "",
         "artifacts/.gitkeep": "",
     }
+    return {
+        relative_name: add_ownership_header(relative_name, content, decision.task_key)
+        for relative_name, content in rendered.items()
+    }
+
+
+def ownership_header(relative_name: str, task_key: str) -> str:
+    if relative_name.endswith(".json"):
+        return ""
+    lines = (
+        f"Generated by {LIFECYCLE_GENERATOR}",
+        f"Task: {task_key}",
+        f"Repository lifecycle version: {LIFECYCLE_VERSION}",
+    )
+    if relative_name.endswith(".md"):
+        return "\n".join(f"<!-- {line} -->" for line in lines) + "\n\n"
+    return "\n".join(f"# {line}" for line in lines) + "\n\n"
+
+
+def add_ownership_header(relative_name: str, content: str, task_key: str) -> str:
+    return ownership_header(relative_name, task_key) + content
+
+
+def parse_ownership(content: str) -> tuple[str, str] | None:
+    generator_match = re.search(r"Generated by ([A-Za-z0-9_.-]+)", content[:500])
+    task_match = re.search(r"Task: ([A-Za-z0-9_.-]+)", content[:500])
+    version_match = re.search(r"Repository lifecycle version: ([A-Za-z0-9_.-]+)", content[:500])
+    if not generator_match and not task_match and not version_match:
+        return None
+    if not generator_match or not task_match or not version_match:
+        raise ApplyBlocked("generated file has incomplete lifecycle ownership metadata")
+    if generator_match.group(1) != LIFECYCLE_GENERATOR:
+        raise ApplyBlocked(f"generated file is owned by a different generator: {generator_match.group(1)}")
+    return task_match.group(1), version_match.group(1)
+
+
+def legacy_starter_file_contents(
+    task: dict[str, Any], decision: Decision, repo_url: str
+) -> dict[str, str]:
+    owned = starter_file_contents(task, decision, repo_url)
+    return {
+        relative_name: content.removeprefix(ownership_header(relative_name, decision.task_key))
+        for relative_name, content in owned.items()
+    }
+
+
+def safe_legacy_migration_content(
+    relative_name: str,
+    existing: str,
+    legacy_content: str,
+    owned_content: str,
+    decision: Decision,
+) -> str | None:
+    if existing == legacy_content:
+        return owned_content
+    if relative_name.endswith(".gitkeep") and not existing:
+        return owned_content
+    if relative_name == ".gitignore" and existing.startswith(legacy_content.rstrip()):
+        return ownership_header(relative_name, decision.task_key) + existing
+    if decision.task_id in existing or decision.task_key in existing:
+        return ownership_header(relative_name, decision.task_key) + existing
+    known_legacy_signature = (
+        relative_name == ".github/ISSUE_TEMPLATE/zoho-task.md"
+        and "name: Zoho Task" in existing
+        and "## Zoho Metadata" in existing
+        and "## Acceptance Criteria" in existing
+    ) or (
+        relative_name == ".github/PULL_REQUEST_TEMPLATE.md"
+        and "## Zoho Task" in existing
+        and "## Validation" in existing
+        and "## Safety" in existing
+    )
+    if known_legacy_signature:
+        return ownership_header(relative_name, decision.task_key) + existing
+    return None
 
 
 def run_process(command: list[str], cwd: Path, timeout: int = 60) -> subprocess.CompletedProcess[str]:
@@ -1181,57 +1331,70 @@ def classify_existing_apply_state(task: dict[str, Any], decision: Decision) -> s
 
 
 def verify_existing_repo_files(local_path: Path) -> None:
-    minimal_missing = [
+    missing = [
         relative_name
-        for relative_name in MINIMAL_REQUIRED_COORDINATION_FILES
+        for relative_name in REQUIRED_GENERATED_FILES
         if not (local_path / relative_name).is_file()
     ]
-    if not minimal_missing:
-        return
-    legacy_missing = [
+    missing.extend(
         relative_name
-        for relative_name in LEGACY_REQUIRED_COORDINATION_FILES
-        if not (local_path / relative_name).is_file()
-    ]
-    if not legacy_missing:
-        return
-    raise ApplyBlocked(
-        "existing repository is missing required AI coordination files for both the minimal and legacy starter packages: "
-        + "minimal missing ["
-        + ", ".join(minimal_missing)
-        + "]; legacy missing ["
-        + ", ".join(legacy_missing)
-        + "]"
+        for relative_name in REQUIRED_GENERATED_DIRECTORIES
+        if not (local_path / relative_name).is_dir()
     )
+    if missing:
+        raise ApplyBlocked(
+            "Repository generation incomplete. Missing files: " + ", ".join(missing)
+        )
 
 
 def ensure_local_files(local_path: Path, task: dict[str, Any], decision: Decision, repo_url: str) -> None:
     if local_path.exists() and (local_path.is_symlink() or not local_path.is_dir()):
         raise ApplyBlocked(f"refusing unsafe local repository path: {local_path}")
-    local_path.mkdir(mode=0o700, parents=False, exist_ok=True)
     contents = starter_file_contents(task, decision, repo_url)
-    preserve_if_present = {
-        ".github/ISSUE_TEMPLATE/zoho-task.md",
-        ".github/PULL_REQUEST_TEMPLATE.md",
-    }
+    legacy_contents = legacy_starter_file_contents(task, decision, repo_url)
+    writes: list[tuple[Path, str]] = []
     for relative_name, content in contents.items():
         path = local_path / relative_name
-        path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             if path.is_symlink() or not path.is_file():
                 raise ApplyBlocked(f"refusing to replace non-regular file: {path}")
             existing = path.read_text(errors="replace")
-            if relative_name == ".gitignore":
-                if existing != content:
-                    raise ApplyBlocked(f"existing file differs; refusing overwrite: {path}")
-            elif relative_name.endswith(".gitkeep"):
+            try:
+                ownership = parse_ownership(existing)
+            except ApplyBlocked as exc:
+                raise ApplyBlocked(f"{path}: {exc}") from None
+            if ownership is not None:
+                owner_task_key, owner_version = ownership
+                if owner_task_key != decision.task_key:
+                    raise ApplyBlocked(
+                        f"existing file belongs to task {owner_task_key}, not {decision.task_key}: {path}"
+                    )
+                if owner_version == LIFECYCLE_VERSION:
+                    # Current generated files are intentionally stable across reruns.
+                    continue
+                writes.append((path, content))
                 continue
-            elif relative_name in preserve_if_present:
+            migration_content = safe_legacy_migration_content(
+                relative_name,
+                existing,
+                legacy_contents[relative_name],
+                content,
+                decision,
+            )
+            if migration_content is not None:
+                writes.append((path, migration_content))
                 continue
-            elif decision.task_id not in existing:
-                raise ApplyBlocked(f"existing file lacks approved task identity; refusing overwrite: {path}")
-            continue
+            raise ApplyBlocked(
+                f"existing file lacks lifecycle ownership marker and is not a recognized legacy generated file: {path}"
+            )
+        writes.append((path, content))
+
+    # No filesystem mutation occurs until every existing file passes ownership validation.
+    local_path.mkdir(mode=0o700, parents=False, exist_ok=True)
+    for path, content in writes:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
+    verify_existing_repo_files(local_path)
 
 
 def ensure_git_repository(local_path: Path) -> None:
@@ -1275,22 +1438,32 @@ def ensure_origin(local_path: Path, repo_name: str) -> None:
     require_command_success(result, "add origin remote")
 
 
-def commit_and_push(local_path: Path, task_key: str) -> None:
-    paths = [
-        "README.md",
-        "TASK.md",
-        "STATUS.md",
-        "AGENTS.md",
-        "CLAUDE.md",
-        "CODEX.md",
-        ".gitignore",
-        ".github",
-        "docs",
-        "scripts",
-        "artifacts",
-    ]
+def stageable_generated_paths(local_path: Path) -> list[str]:
+    stageable: list[str] = []
+    for relative_name in GENERATED_GIT_PATHS:
+        tracked = run_process(
+            ["git", "ls-files", "--error-unmatch", "--", relative_name], local_path
+        )
+        if tracked.returncode == 0:
+            stageable.append(relative_name)
+            continue
+        ignored = run_process(["git", "check-ignore", "-q", "--", relative_name], local_path)
+        if ignored.returncode == 0:
+            continue
+        if ignored.returncode != 1:
+            require_command_success(ignored, f"inspect ignore state for {relative_name}")
+        stageable.append(relative_name)
+    return stageable
+
+
+def stage_generated_files(local_path: Path) -> None:
+    paths = stageable_generated_paths(local_path)
     result = run_process(["git", "add", "--", *paths], local_path)
     require_command_success(result, "git add starter files")
+
+
+def commit_and_push(local_path: Path, task_key: str) -> None:
+    stage_generated_files(local_path)
     staged = run_process(["git", "diff", "--cached", "--quiet"], local_path)
     if staged.returncode not in (0, 1):
         require_command_success(staged, "inspect staged changes")
@@ -1561,8 +1734,9 @@ def apply_one_task(
     provisional_url = f"https://github.com/{GITHUB_ORG}/{decision.repo_name}"
     if decision.action == "existing":
         classify_existing_apply_state(task, decision)
+        ensure_local_files(local_path, task, decision, provisional_url)
         verify_existing_repo_files(local_path)
-        report.add("WARN", "M. Apply execution", "verified partial existing state; continuing idempotent resume")
+        report.add("WARN", "M. Apply execution", "repaired or verified partial existing state; continuing idempotent resume")
         report.add("SUCCESS", "M. Apply execution", f"existing coordination files verified at {local_path}")
     elif decision.action != "would-create":
         raise ApplyBlocked(f"unsupported apply decision: {decision.action}")

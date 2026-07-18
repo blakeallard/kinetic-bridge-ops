@@ -32,7 +32,20 @@ python3 repo_lifecycle_dry_run.py \
   --confirm-apply BI1-T71
 ```
 
-The apply path creates or verifies only the expected local repository, creates or verifies a private GitHub repository, commits and pushes starter files, atomically records `task_repo_map.json`, and posts one idempotent Zoho comment. The default starter package is intentionally minimal: `README.md`, `TASK.md`, `AGENTS.md`, `docs/CURRENT_HANDOFF.md`, `.gitignore`, the GitHub issue template, the pull request template, and empty `docs/`, `scripts/`, and `artifacts/` placeholders. Existing or partial state is verified before continuation; conflicting files, remotes, mappings, repository visibility, or task metadata block execution.
+The apply path creates or verifies the expected local repository and private GitHub repository, renders the complete template-driven agent scaffold, validates it before Git, commits and pushes, creates or verifies Issue #1, adds it to the configured GitHub Project with initial status, atomically records `task_repo_map.json`, and posts one idempotent Zoho completion comment. The scaffold includes `README.md`, `TASK.md`, `STATUS.md`, `AGENTS.md`, `CLAUDE.md`, `CODEX.md`, GitHub templates, eight maintenance workflows, the generated Zoho task mapping and commit-sync client, and the required `docs/`, `scripts/`, and `artifacts/` directories. Existing partial repositories are repaired by generating missing files while preserving existing work; conflicting files, remotes, mappings, repository visibility, or task metadata block execution.
+
+## Generated GitHub Actions
+
+- `agent-readiness.yml` protects the required AI-agent files and directories.
+- `python-quality.yml` installs optional requirements, compiles Python, runs Ruff, and runs pytest when tests exist.
+- `repository-validation.yml` protects lifecycle v2 ownership and task metadata across every generated file.
+- `claude-context-check.yml` verifies that task, status, Claude, and shared-agent context remains actionable.
+- `issue-development.yml` labels implementation issues, creates a deterministic development branch, and comments the prepared metadata without opening or merging a PR.
+- `pr-validation.yml` checks the PR requirements/validation contract, status and documentation updates, applicable Python tests, and lifecycle-file preservation.
+- `security.yml` runs weekly and on changes, auditing Python dependencies and checking for tracked sensitive files or private keys.
+- `sync-commits-to-zoho.yml` sends each pushed branch commit to the matching Zoho Projects task through a permanent Zoho Flow webhook. Flow must verify that the live task still carries the exact `repo-needed` tag before adding the comment.
+
+The webhook URL is an organization Actions secret named `ZOHO_COMMIT_SYNC_WEBHOOK_URL`, granted only to lifecycle-managed private repositories. It is never generated into repository content.
 
 Optional/manual add-ons such as `docs/PROCESS.md` and `.github/copilot-instructions.md` have preserved templates in this repo, but the automation does not generate them by default and does not expose a configuration switch for them today.
 

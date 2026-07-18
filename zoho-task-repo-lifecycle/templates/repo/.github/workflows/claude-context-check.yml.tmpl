@@ -1,0 +1,25 @@
+name: Claude context check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-context:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate current AI context
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -f TASK.md ]] || { echo "::error file=TASK.md::TASK.md is required"; exit 1; }
+          [[ -f STATUS.md ]] || { echo "::error file=STATUS.md::STATUS.md is required"; exit 1; }
+          grep -Eq '^## Current (State|Progress)' STATUS.md || { echo "::error file=STATUS.md::Missing current state section"; exit 1; }
+          grep -q '^# Claude Instructions' CLAUDE.md || { echo "::error file=CLAUDE.md::Missing Claude operating instructions"; exit 1; }
+          grep -q 'Read.*README.md' CLAUDE.md || { echo "::error file=CLAUDE.md::Missing Claude read-order guidance"; exit 1; }
+          grep -q '^# Agent Instructions' AGENTS.md || { echo "::error file=AGENTS.md::Missing shared agent instructions"; exit 1; }
+          grep -q '^## Read Order' AGENTS.md || { echo "::error file=AGENTS.md::Missing agent workflow read order"; exit 1; }
