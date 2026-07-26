@@ -5,3 +5,4 @@ poll_error.log
 new_task_alerts.md
 last_seen_tasks.json
 new_tasks.json
+zoho_access_token_cache.json

@@ -88,6 +88,7 @@ To test against a specific task without waiting for a real new one, hand-build a
 
 ## Notes
 
-- The poller script doesn't call Zoho directly — it relies on Claude Code's `claude -p` to do the actual MCP call, since that's the environment with reliable Zoho access (see tool_search sync issues in Claude Chat).
-- If Claude Code's `--output-format json` shape changes in a future version, the JSON-extraction step in `run_poll.sh` may need adjusting — check `poll_error.log` if the poller starts failing silently.
+- The poller now calls the Zoho Projects REST API directly (`fetch_zoho_tasks.py`), reusing the OAuth refresh credentials in `/Users/blakeallard/bevco/scripts/zoho_projects_to_cliq/.env` — the same source the Cliq status poller and repo-lifecycle tool use. The previous `claude -p` MCP fetch was removed because it required an interactive Claude login and failed under cron.
+- If the fetch starts failing, check `poll_error.log`; token refresh problems and HTTP errors are logged there. The access-token cache (`zoho_access_token_cache.json`, git-ignored) is local to this folder; the status poller's cache is read but never written.
+- When a newly detected task carries the exact `repo-needed` tag, `run_poll.sh` prints an `[ACTION NEEDED]` line into `poll.log` with the exact repo-lifecycle dry-run/apply commands to run. Repo creation stays human-approved — the poller never creates repos itself.
 - Tier framework lives in three places by design (this skill, your CLAUDE.md, and Claude's memory) — if you ever change your permission tiers, update all three.
