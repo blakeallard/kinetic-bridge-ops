@@ -1,0 +1,35 @@
+# Environment / credentials
+.env
+.env.*
+!.env.example
+*.token
+*token*
+*secret*
+*oauth*
+*credential*
+
+# Runtime state (processed-file registry — contains private meeting names)
+processed_notes.json
+processed_notes.json.bak
+blake_task_board.json
+
+# Logs and temp files
+*.log
+*.tmp
+tmp/
+/tmp/
+
+# macOS
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.progress.json
+
+# Node (not used here, precaution)
+node_modules/
+.cache/
+.venv/
