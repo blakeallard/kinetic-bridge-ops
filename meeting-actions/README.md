@@ -110,7 +110,7 @@ Response:
 ## Local run
 
 ```bash
-cd ~/Dev/bevco/meeting-actions
+cd ~/bevco/automations/meeting-actions
 python3.13 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in real values

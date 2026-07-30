@@ -15,11 +15,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NOTES_DIR="$HOME/Bevco/notes/meeting_notes/weekly"
+NOTES_DIR="$HOME/bevco/notes/meeting_notes/weekly"
 STATE_FILE="$SCRIPT_DIR/processed_notes.json"
 CLAUDE_BIN="$HOME/.local/bin/claude"
 PYTHON="python3.13"
-VISUALIZER_DIR="$HOME/Dev/workflow-visualizer"
+VISUALIZER_DIR="$HOME/Dev/web/workflow-visualizer"
 WORKFLOW_ID="meeting_actions"
 
 # ── args ────────────────────────────────────────────────────────────────────
@@ -267,7 +267,7 @@ if not dry_run:
             return json.loads(r.read())['access_token']
 
     print("[dedup] Fetching existing tasks from Zoho (all pages)...")
-    ENV_FILE = '/Users/blakeallard/bevco/scripts/zoho_task_folder_sync/.env'
+    ENV_FILE = '/Users/blakeallard/bevco/automations/zoho-task-folder-sync/.env'
     env = _load_env(ENV_FILE)
     try:
         token = _zoho_token(env)

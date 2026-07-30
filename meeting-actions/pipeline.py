@@ -52,7 +52,7 @@ def load_local_env(env_file: Path | None = None) -> None:
     """
     candidates = [env_file] if env_file else [
         Path(__file__).parent / ".env",
-        Path("/Users/blakeallard/bevco/scripts/zoho_task_folder_sync/.env"),
+        Path("/Users/blakeallard/bevco/automations/zoho-task-folder-sync/.env"),
     ]
     for path in candidates:
         if not path or not path.exists():

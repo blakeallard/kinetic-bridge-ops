@@ -6,7 +6,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDRIVE="$HOME/Library/CloudStorage/ZohoWorkDriveTrueSync-BEVCO/Org Meeting Recordings/Meeting Recordings"
+WORKDRIVE="$HOME/Library/CloudStorage/ZohoWorkDriveTrueSync-KineticBridge/Org Meeting Recordings/Meeting Recordings"
 STATE_FILE="$SCRIPT_DIR/processed_notes.json"
 LOG="$SCRIPT_DIR/watcher.log"
 PYTHON="python3.13"

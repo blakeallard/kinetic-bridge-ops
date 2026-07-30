@@ -22,7 +22,7 @@ from pathlib import Path
 import certifi
 _SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 
-ENV_FILE = Path("/Users/blakeallard/bevco/scripts/zoho_task_folder_sync/.env")
+ENV_FILE = Path("/Users/blakeallard/bevco/automations/zoho-task-folder-sync/.env")
 
 PORTAL_ID = "898600220"
 PROJECT_ID = "2543412000001324010"

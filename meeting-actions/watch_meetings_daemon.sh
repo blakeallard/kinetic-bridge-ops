@@ -12,7 +12,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKDRIVE="$HOME/Library/CloudStorage/ZohoWorkDriveTrueSync-BEVCO/Org Meeting Recordings/Meeting Recordings"
+WORKDRIVE="$HOME/Library/CloudStorage/ZohoWorkDriveTrueSync-KineticBridge/Org Meeting Recordings/Meeting Recordings"
 LOG="$SCRIPT_DIR/watcher.log"
 FSWATCH="$(command -v fswatch || echo /opt/homebrew/bin/fswatch)"
 
