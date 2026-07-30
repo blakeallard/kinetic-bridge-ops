@@ -1,0 +1,9 @@
+.env
+.env.*
+__pycache__/
+*.pyc
+task_repo_map.json
+reports/repo_lifecycle_dry_run_*.md
+reports/repo_lifecycle_apply_*.md
+.DS_Store
+*.log

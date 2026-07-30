@@ -1,0 +1,43 @@
+# Agent Instructions
+
+{{TASK_MARKER}}
+
+## Read Order
+
+1. `README.md`
+2. `TASK.md`
+3. `STATUS.md`
+4. Review `AGENTS.md`, `CLAUDE.md`, and `CODEX.md` and understand the repository structure.
+5. Read `docs/CURRENT_HANDOFF.md` and relevant source, scripts, tests, logs, and artifacts.
+
+## Source of Truth Rules
+
+- Treat `TASK.md` as the imported task snapshot and baseline scope.
+- Treat `docs/CURRENT_HANDOFF.md` as the current execution log and next-step guide.
+- Use repository evidence before assumptions; confirm behavior from source, tests, logs, or validated outputs.
+- Record assumptions explicitly when the repository does not yet prove them.
+
+## Approval Boundaries
+
+- Do not modify Zoho runtime systems, production systems, external GitHub configuration, or customer data unless explicitly approved.
+- Do not delete, overwrite, or rewrite existing work without explicit approval.
+- Preserve uncommitted and untracked work you did not create.
+
+## Commit and Push Rules
+
+- Do not commit or push unless explicitly approved.
+- Keep changes bounded, reviewable, and scoped to this repository.
+- Do not commit credentials, generated caches, logs, local state, private customer data, or credential-bearing URLs.
+
+## Validation Expectations
+
+- Run the existing project validators, tests, dry-runs, or syntax checks before stopping.
+- Record the exact validation commands and outcome in `docs/CURRENT_HANDOFF.md` or the pull request.
+- If no automated validator exists, say so explicitly and note the manual verification performed.
+
+## Handoff Behavior
+
+- Update `STATUS.md` after meaningful changes so progress, completed work, blockers, and next actions remain current.
+- Update `docs/CURRENT_HANDOFF.md` at the end of meaningful work.
+- Preserve chronological round history; append or prepend new rounds without deleting prior context.
+- Call out completed work, blockers, unresolved risks, uncommitted state, and the single recommended next task.

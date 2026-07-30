@@ -1,0 +1,44 @@
+name: Security and dependencies
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Audit Python dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f requirements.txt ]]; then
+            python -m pip install --upgrade pip pip-audit
+            python -m pip_audit -r requirements.txt
+          else
+            echo "No requirements.txt found; dependency audit skipped."
+          fi
+      - name: Check tracked sensitive files and private keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git ls-files | grep -Eq '(^|/)(\.env($|\.)|id_rsa$|id_ed25519$|.*\.(pem|p12|pfx|key)$)'; then
+            echo "::error::Potential secret-bearing file is tracked"
+            exit 1
+          fi
+          if git grep -I -n -E -- '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----'; then
+            echo "::error::Private key material detected"
+            exit 1
+          fi
+          echo "Basic repository secret checks passed."

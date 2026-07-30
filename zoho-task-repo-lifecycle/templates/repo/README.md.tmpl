@@ -1,0 +1,36 @@
+# {{TASK_KEY}}: {{TASK_TITLE}}
+
+{{TASK_MARKER}}
+
+## Purpose
+
+{{PURPOSE}}
+
+## Project Overview
+
+- Task key: `{{TASK_KEY}}`
+- Title: {{TASK_TITLE}}
+- Zoho task ID: `{{TASK_ID}}`
+- Source system: Zoho Projects
+- Repository: {{REPO_URL}}
+
+## Getting Started
+
+1. Read `TASK.md` for the imported task scope, metadata, and boundaries.
+2. Read `STATUS.md` for progress, blockers, and next actions.
+3. Read `AGENTS.md`, `CLAUDE.md`, and `CODEX.md` for agent workflow and validation rules.
+4. Read `docs/CURRENT_HANDOFF.md` for the active state of the repo before changing files.
+
+No task-specific runtime or dependencies are defined at bootstrap. Add setup commands here when implementation begins.
+
+## High-Level Architecture
+
+- `TASK.md`: source task metadata and description
+- `STATUS.md`: current progress, completed items, blockers, and next actions
+- `AGENTS.md`: shared execution rules for coding agents working in this repo
+- `CLAUDE.md` / `CODEX.md`: tool-specific execution expectations
+- `docs/CURRENT_HANDOFF.md`: current state, round history, blockers, and next step
+- `docs/`: documentation and deliverables
+- `scripts/`: task-specific implementation
+- `artifacts/`: approved supporting artifacts
+- `.github/`: issue/PR templates and repository validation workflow

@@ -1,0 +1,11 @@
+{
+  "mappings": [
+    {
+      "task_id": "2543412000000000000",
+      "task_key": "BI1-T00",
+      "repo_name": "bi1-t00-example-task",
+      "repo_url": "https://github.com/blake-bevco-tech/bi1-t00-example-task",
+      "local_path": "/Users/blakeallard/bevco/repos/bi1-t00-example-task"
+    }
+  ]
+}

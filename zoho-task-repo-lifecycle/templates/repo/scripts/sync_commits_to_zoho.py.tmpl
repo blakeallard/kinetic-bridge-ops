@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""Send one sanitized Zoho task-comment event per pushed GitHub commit."""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+STATUS_CONTEXT = "zoho-projects/task-comment"
+GITHUB_API_VERSION = "2022-11-28"
+REQUIRED_MAPPING_FIELDS = (
+    "required_task_tag",
+    "task_key",
+    "portal_id",
+    "project_id",
+    "task_id",
+)
+
+
+class SyncError(RuntimeError):
+    """Raised for a sanitized, user-facing synchronization failure."""
+
+
+@dataclass
+class SyncStats:
+    delivered: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SyncError(f"Unable to read valid JSON from {path}") from exc
+    if not isinstance(value, dict):
+        raise SyncError(f"Expected a JSON object in {path}")
+    return value
+
+
+def validate_mapping(mapping: dict[str, Any]) -> None:
+    missing = [field for field in REQUIRED_MAPPING_FIELDS if not str(mapping.get(field, "")).strip()]
+    if missing:
+        raise SyncError(f"Zoho task mapping is missing: {', '.join(missing)}")
+
+
+def should_process_event(event: dict[str, Any], mapping: dict[str, Any]) -> tuple[bool, str]:
+    if not mapping.get("enabled", True):
+        return False, "Zoho commit synchronization is disabled in the task mapping"
+    if event.get("deleted"):
+        return False, "Deleted branch push ignored"
+    ref = str(event.get("ref", ""))
+    if not ref.startswith("refs/heads/"):
+        return False, "Non-branch push ignored"
+    if not event.get("commits"):
+        return False, "Push contains no commits"
+    return True, ""
+
+
+def commit_message(value: Any, limit: int = 5000) -> str:
+    message = str(value or "").strip()
+    return (message or "No commit message")[:limit]
+
+
+def build_payload(
+    mapping: dict[str, Any], event: dict[str, Any], commit: dict[str, Any]
+) -> dict[str, Any]:
+    repository = event.get("repository") or {}
+    repository_name = str(repository.get("full_name") or repository.get("name") or "unknown")
+    sha = str(commit.get("id") or "").strip()
+    if not sha:
+        raise SyncError("Push payload contains a commit without an ID")
+    branch = str(event.get("ref", "")).removeprefix("refs/heads/")
+    message = commit_message(commit.get("message"))
+    author = commit.get("author") or {}
+    author_name = str(author.get("name") or "Unknown")[:200]
+    commit_url = str(commit.get("url") or "")
+    marker = f"github-commit:{repository_name}:{sha}"
+
+    comment_content = "\n".join(
+        (
+            "GitHub commit synced",
+            "",
+            f"Commit: {sha[:7]}",
+            f"Message: {message}",
+            f"Branch: {branch}",
+            f"Author: {author_name}",
+            f"Repository: {repository_name}",
+            f"Commit link: {commit_url}",
+            f"Sync marker: {marker}",
+        )
+    )
+    comment_content_html = "<br>".join(
+        (
+            "GitHub commit synced",
+            "",
+            f"Commit: {html.escape(sha[:7])}",
+            f"Message: {html.escape(message).replace(chr(10), '<br>')}",
+            f"Branch: {html.escape(branch)}",
+            f"Author: {html.escape(author_name)}",
+            f"Repository: {html.escape(repository_name)}",
+            f'Commit link: <a href="{html.escape(commit_url, quote=True)}">{html.escape(commit_url)}</a>',
+            f"Sync marker: {html.escape(marker)}",
+        )
+    )
+
+    return {
+        "schema_version": "1.0",
+        "event_name": "GITHUB_COMMIT_PUSHED",
+        "idempotency_key": marker,
+        "required_task_tag": str(mapping["required_task_tag"]),
+        "task": {field: str(mapping[field]) for field in REQUIRED_MAPPING_FIELDS},
+        "repository": repository_name,
+        "branch": branch,
+        "commit": {
+            "sha": sha,
+            "short_sha": sha[:7],
+            "message": message,
+            "author_name": author_name,
+            "url": commit_url,
+            "timestamp": str(commit.get("timestamp") or ""),
+        },
+        "comment_content": comment_content,
+        "comment_content_html": comment_content_html,
+    }
+
+
+def request_json(
+    url: str,
+    *,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> Any:
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request_headers = {"Accept": "application/json", **(headers or {})}
+    if body is not None:
+        request_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=body, headers=request_headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            response_body = response.read()
+    except urllib.error.HTTPError as exc:
+        raise SyncError(f"Remote service returned HTTP {exc.code}") from None
+    except urllib.error.URLError:
+        raise SyncError("Remote service could not be reached") from None
+    if not response_body:
+        return None
+    try:
+        return json.loads(response_body)
+    except json.JSONDecodeError:
+        return None
+
+
+def github_headers(token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": GITHUB_API_VERSION,
+    }
+
+
+def get_sync_state(repository: str, sha: str, token: str) -> str | None:
+    statuses = request_json(
+        f"https://api.github.com/repos/{repository}/commits/{sha}/statuses?per_page=100",
+        headers=github_headers(token),
+    )
+    if not isinstance(statuses, list):
+        return None
+    for status in statuses:
+        if isinstance(status, dict) and status.get("context") == STATUS_CONTEXT:
+            return str(status.get("state") or "")
+    return None
+
+
+def set_commit_status(
+    repository: str,
+    sha: str,
+    token: str,
+    state: str,
+    description: str,
+    target_url: str,
+) -> None:
+    payload = {
+        "state": state,
+        "context": STATUS_CONTEXT,
+        "description": description[:140],
+    }
+    if target_url:
+        payload["target_url"] = target_url
+    request_json(
+        f"https://api.github.com/repos/{repository}/statuses/{sha}",
+        method="POST",
+        payload=payload,
+        headers=github_headers(token),
+    )
+
+
+def deliver_to_flow(webhook_url: str, payload: dict[str, Any]) -> None:
+    request_json(webhook_url, method="POST", payload=payload)
+
+
+def sync_commits(
+    mapping: dict[str, Any],
+    event: dict[str, Any],
+    webhook_url: str,
+    github_token: str,
+) -> SyncStats:
+    validate_mapping(mapping)
+    process, reason = should_process_event(event, mapping)
+    if not process:
+        print(f"::notice::{reason}")
+        return SyncStats()
+
+    repository_data = event.get("repository") or {}
+    repository = str(repository_data.get("full_name") or "").strip()
+    if not repository:
+        raise SyncError("GitHub push payload is missing repository.full_name")
+
+    stats = SyncStats()
+    for commit in event.get("commits", []):
+        if not isinstance(commit, dict):
+            stats.failed += 1
+            continue
+        payload = build_payload(mapping, event, commit)
+        sha = payload["commit"]["sha"]
+        commit_url = payload["commit"]["url"]
+        try:
+            current_state = get_sync_state(repository, sha, github_token)
+            if current_state in {"success", "pending"}:
+                print(f"Already synchronized or in progress: {sha[:7]}")
+                stats.skipped += 1
+                continue
+            set_commit_status(
+                repository,
+                sha,
+                github_token,
+                "pending",
+                f"Sending {mapping['task_key']} task comment",
+                commit_url,
+            )
+            deliver_to_flow(webhook_url, payload)
+            set_commit_status(
+                repository,
+                sha,
+                github_token,
+                "success",
+                f"Accepted for {mapping['task_key']} task comment",
+                commit_url,
+            )
+            print(f"Accepted by Zoho Flow: {sha[:7]}")
+            stats.delivered += 1
+        except SyncError as exc:
+            stats.failed += 1
+            print(f"::warning::Commit {sha[:7]} was not synchronized: {exc}")
+            try:
+                set_commit_status(
+                    repository,
+                    sha,
+                    github_token,
+                    "failure",
+                    f"Could not send {mapping['task_key']} task comment",
+                    commit_url,
+                )
+            except SyncError:
+                print(f"::warning::Could not record failure status for {sha[:7]}")
+    return stats
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--event", type=Path, required=True, help="GitHub push event JSON file")
+    parser.add_argument("--mapping", type=Path, required=True, help="Zoho task mapping JSON file")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv or sys.argv[1:])
+    webhook_url = os.environ.get("ZOHO_COMMIT_SYNC_WEBHOOK_URL", "").strip()
+    github_token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if not webhook_url:
+        print("::notice::ZOHO_COMMIT_SYNC_WEBHOOK_URL is not configured; synchronization skipped")
+        return 0
+    if not github_token:
+        print("::error::GITHUB_TOKEN is required for duplicate protection")
+        return 1
+    try:
+        stats = sync_commits(
+            load_json(args.mapping),
+            load_json(args.event),
+            webhook_url,
+            github_token,
+        )
+    except SyncError as exc:
+        print(f"::error::{exc}")
+        return 1
+    print(
+        f"Zoho sync summary: delivered={stats.delivered}, "
+        f"skipped={stats.skipped}, failed={stats.failed}"
+    )
+    return 1 if stats.failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

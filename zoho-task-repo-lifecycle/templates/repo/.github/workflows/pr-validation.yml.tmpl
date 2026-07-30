@@ -1,0 +1,37 @@
+name: Pull request AI readiness
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pr-readiness:
+    runs-on: ubuntu-latest
+    env:
+      PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Validate PR contract and lifecycle files
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=(README.md TASK.md STATUS.md AGENTS.md CLAUDE.md CODEX.md)
+          for path in "${required[@]}"; do
+            [[ -f "$path" ]] || { echo "::error file=$path::Lifecycle file was removed"; exit 1; }
+          done
+          grep -q '## Requirements Addressed' <<< "$PR_BODY" || { echo "::error::PR body must describe requirements addressed"; exit 1; }
+          grep -q '## Validation' <<< "$PR_BODY" || { echo "::error::PR body must document validation"; exit 1; }
+
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          changed="$(git diff --name-only "$base" "$head")"
+          grep -qx 'STATUS.md' <<< "$changed" || { echo "::error file=STATUS.md::STATUS.md must be updated in each implementation PR"; exit 1; }
+          grep -Eq '^(README\.md|TASK\.md|STATUS\.md|AGENTS\.md|CLAUDE\.md|CODEX\.md|docs/)' <<< "$changed" || { echo "::error::Documentation must be updated"; exit 1; }
+          if grep -Eq '\.py$' <<< "$changed"; then
+            grep -Eq '(^|/)tests?/.*(test_.*|.*_test)\.py$' <<< "$changed" || { echo "::error::Python changes require an applicable test update"; exit 1; }
+          fi
