@@ -1,0 +1,5 @@
+.env
+*.log
+status_poller_state.json
+zoho_access_token_cache.json
+__pycache__/
