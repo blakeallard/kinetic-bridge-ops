@@ -1,0 +1,36 @@
+{
+  "dry_run": true,
+  "portal_id": "898600220",
+  "project_id": "2543412000001324010",
+  "status": {
+    "name": "In Progress",
+    "id": "2543412000000031001",
+    "verified": true
+  },
+  "tags": [
+    {
+      "name": "automation",
+      "id": "2543412000001391053"
+    },
+    {
+      "name": "internal-work",
+      "id": "2543412000001391061"
+    }
+  ],
+  "task_parameters": {
+    "name": "Website Planning Meeting - Build website routing flow",
+    "description": "Source: Zoho AI meeting summary\nSummary file: known_owner_summary.txt\nMeeting name: Website Planning Meeting\nOriginal action text: Build website routing flow\nOwner raw: Blake\nOwner resolution: matched\nDetected owners: Blake (resolution=matched; canonical_name=Blake Allard; owner_id=2543412000001324206)\nDue date text: Friday\nDue date calculation: Not performed\nAction hash: 202e3eb54a60abcdc7352601c46935d0b2f3e64b6acb760bd3c6a35255043fb8\n\nWorkflow Diagnostic\nRequested task: Not provided\nBusiness problem: Not provided\nDesired workflow: Not provided\nSuccess criteria: Not provided\nCurrent status: Not provided\nProblem type: Not provided\nSystems involved: Not provided\nData needed: Not provided\nAccess / approval needed: Not provided\nInformation between systems: Not provided\nOne-sentence diagnosis: Not provided\nNext action: Not provided",
+    "custom_status": "2543412000000031001",
+    "tagIds": [
+      "2543412000001391053",
+      "2543412000001391061"
+    ],
+    "person_responsible": "2543412000001324206"
+  },
+  "validation": {
+    "ready_for_live": true,
+    "missing_status_id": false,
+    "missing_tag_ids": [],
+    "owner_assignment": "matched"
+  }
+}

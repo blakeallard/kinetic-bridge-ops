@@ -1,0 +1,15 @@
+{
+  "diagnostic_mode": true,
+  "file_text_present": true,
+  "file_text_non_empty": true,
+  "file_text_length": 1287,
+  "normalized_text_length": 1287,
+  "line_count": 19,
+  "actual_newline_count": 18,
+  "escaped_newline_sequence_count": 0,
+  "first_200_chars": "[Sanitized real-file fixture. Accepted only with verified source folder \"06-30 - Blake's Weekly Catch-Up\"; otherwise reject as non-target.]\n\n1. The team reviewed an internal workflow and its current i",
+  "bullet_candidate_count": 13,
+  "symbol_bullet_candidate_count": 10,
+  "numbered_candidate_count": 3,
+  "first_detected_bullet_line": "1. The team reviewed an internal workflow and its current implementation."
+}

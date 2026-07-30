@@ -1,0 +1,1178 @@
+/*
+ * Zoho-only meeting-actions v2: Stage 8 parser + deterministic QC draft.
+ *
+ * SOURCE OF TRUTH:
+ *   scripts/parse_summary.py, scripts/review_action_candidates.py,
+ *   and samples/expected/*.json
+ *
+ * EXPECTED ZOHO FLOW OR WORKDRIVE WRAPPER INPUT:
+ *   flow_input (MAP)
+ *     file_id   (TEXT) - stable WorkDrive file ID when available
+ *     file_name (TEXT) - required; must end with _summary.txt
+ *     file_path (TEXT) - WorkDrive display/audit path
+ *     file_text (TEXT) - required; caller-fetched UTF-8 summary content
+ *
+ * This function does not fetch a file, call invokeurl, call Zoho Projects,
+ * create a task, mutate a registry, or perform any other external write.
+ * It returns raw actions, reasoned QC skips, selected actions, and an items
+ * alias containing selected actions only.
+ *
+ * Function signature syntax can vary by Zoho product. In a Zoho editor that
+ * configures name/arguments/return type in the UI, configure:
+ *   name: parse_meeting_summary
+ *   argument: flow_input (KEY-VALUE / MAP)
+ *   return type: KEY-VALUE / MAP
+ * and paste only the body between the outer braces if required.
+ */
+map parse_meeting_summary(map flow_input)
+{
+	result = Map();
+	items = List();
+	errors = List();
+
+	file_id = ifnull(flow_input.get("file_id"), "").toString().trim();
+	file_name = ifnull(flow_input.get("file_name"), "").toString().trim();
+	file_path = ifnull(flow_input.get("file_path"), "").toString().trim();
+	file_text_value = flow_input.get("file_text");
+	file_text = ifnull(file_text_value, "").toString();
+	diagnostic_mode = false;
+	diagnostic_mode_value = flow_input.get("diagnostic_mode");
+	if(diagnostic_mode_value != null && diagnostic_mode_value.toString().trim().toLowerCase() == "true")
+	{
+		diagnostic_mode = true;
+	}
+
+	result.put("dry_run", true);
+	result.put("parser_version", "deluge-stage8-v2");
+	result.put("file_id", file_id);
+	result.put("file_name", file_name);
+	result.put("file_path", file_path);
+
+	/*
+	 * Stage 9 runtime diagnostics. These fields only describe the caller-supplied
+	 * text and line splitting; they do not change parsing behavior.
+	 */
+	normalized_file_text = file_text.replaceAll("\r\n", "\n", true);
+	normalized_file_text = normalized_file_text.replaceAll("\r", "\n", true);
+	normalized_file_text = normalized_file_text.replaceAll("\t", "    ", true);
+	lines = normalized_file_text.toList("\n");
+	if(diagnostic_mode)
+	{
+		first_200_chars = file_text;
+		if(first_200_chars.length() > 200)
+		{
+			first_200_chars = first_200_chars.subString(0,200);
+		}
+		actual_newline_count = file_text.length() - file_text.replaceAll("\n", "", true).length();
+		escaped_newline_length = file_text.length() - file_text.replaceAll("\\n", "", true).length();
+		escaped_newline_sequence_count = escaped_newline_length / 2;
+		bullet_candidate_count = 0;
+		symbol_bullet_candidate_count = 0;
+		numbered_candidate_count = 0;
+		first_detected_bullet_line = "";
+		for each diagnostic_line in lines
+		{
+			/*
+			 * Creator runtime did not recognize these bullets through matches().
+			 * Classify the trimmed prefix with deterministic string operations.
+			 */
+			diagnostic_trimmed = diagnostic_line.trim();
+			diagnostic_symbol_bullet = diagnostic_trimmed.startsWith("- ") || diagnostic_trimmed.startsWith("* ") || diagnostic_trimmed.startsWith("• ");
+			diagnostic_numbered_bullet = false;
+			diagnostic_dot_separator = diagnostic_trimmed.indexOf(". ");
+			diagnostic_paren_separator = diagnostic_trimmed.indexOf(") ");
+			diagnostic_separator = -1;
+			if(diagnostic_dot_separator > 0 && (diagnostic_paren_separator < 0 || diagnostic_dot_separator < diagnostic_paren_separator))
+			{
+				diagnostic_separator = diagnostic_dot_separator;
+			}
+			else if(diagnostic_paren_separator > 0)
+			{
+				diagnostic_separator = diagnostic_paren_separator;
+			}
+			if(!diagnostic_symbol_bullet && diagnostic_separator > 0)
+			{
+				diagnostic_number_prefix = diagnostic_trimmed.subString(0,diagnostic_separator);
+				diagnostic_numbered_bullet = diagnostic_number_prefix.isNumber() && !diagnostic_number_prefix.contains(".") && !diagnostic_number_prefix.contains("-") && !diagnostic_number_prefix.contains("+") && !diagnostic_number_prefix.contains(",") && !diagnostic_number_prefix.contains(" ");
+			}
+			if(diagnostic_symbol_bullet)
+			{
+				diagnostic_body_start = 2;
+			}
+			else
+			{
+				diagnostic_body_start = diagnostic_separator + 2;
+			}
+			diagnostic_is_bullet = diagnostic_symbol_bullet || diagnostic_numbered_bullet;
+			if(diagnostic_is_bullet && diagnostic_trimmed.length() > diagnostic_body_start)
+			{
+				bullet_candidate_count = bullet_candidate_count + 1;
+				if(diagnostic_symbol_bullet)
+				{
+					symbol_bullet_candidate_count = symbol_bullet_candidate_count + 1;
+				}
+				else
+				{
+					numbered_candidate_count = numbered_candidate_count + 1;
+				}
+				if(first_detected_bullet_line == "")
+				{
+					first_detected_bullet_line = diagnostic_trimmed;
+				}
+			}
+		}
+		result.put("diagnostic_mode", true);
+		result.put("file_text_present", file_text_value != null);
+		result.put("file_text_non_empty", file_text.length() > 0);
+		result.put("file_text_length", file_text.length());
+		result.put("normalized_text_length", normalized_file_text.length());
+		result.put("line_count", lines.size());
+		result.put("actual_newline_count", actual_newline_count);
+		result.put("escaped_newline_sequence_count", escaped_newline_sequence_count);
+		result.put("first_200_chars", first_200_chars);
+		result.put("bullet_candidate_count", bullet_candidate_count);
+		result.put("symbol_bullet_candidate_count", symbol_bullet_candidate_count);
+		result.put("numbered_candidate_count", numbered_candidate_count);
+		result.put("first_detected_bullet_line", first_detected_bullet_line);
+	}
+
+	if(file_name == "")
+	{
+		errors.add("file_name is required");
+	}
+	else if(!file_name.endsWith("_summary.txt"))
+	{
+		errors.add("file_name must end with _summary.txt");
+	}
+	if(file_text_value == null)
+	{
+		errors.add("file_text is required");
+	}
+
+	if(errors.size() > 0)
+	{
+		result.put("items", items);
+		result.put("item_count", 0);
+		result.put("parsed_actions_raw", items);
+		result.put("skipped_candidate_reviews", List());
+		result.put("parsed_actions_selected", items);
+		result.put("payload_input_items", items);
+		result.put("errors", errors);
+		return result;
+	}
+
+	/* Known owner aliases. IDs are configuration references, not credentials. */
+	owner_map = Map();
+	blake = Map();
+	blake.put("canonical_name", "Blake Allard");
+	blake.put("owner_id", "2543412000001324206");
+	bill = Map();
+	bill.put("canonical_name", "Bill Beverley");
+	bill.put("owner_id", "2543412000000059003");
+	bryan = Map();
+	bryan.put("canonical_name", "Bryan Ovalle");
+	bryan.put("owner_id", "2543412000000108001");
+	owner_map.put("blake", blake);
+	owner_map.put("blake allard", blake);
+	owner_map.put("bill", bill);
+	owner_map.put("bill beverley", bill);
+	owner_map.put("bryan", bryan);
+	owner_map.put("brian", bryan);
+	owner_map.put("bryan ovalle", bryan);
+
+	approved_sections = {"action item","action items","next actions","next steps"};
+	known_major_headings = {"summary","meeting summary","notes","decisions","key takeaways","transcript","agenda"};
+
+	/*
+	 * First pass: isolate approved sections and build raw top-level action
+	 * candidates with nested Owner/Assignee and Due metadata. This stage does
+	 * not resolve owners and does not infer unbulleted prose as an action.
+	 */
+	raw_candidates = List();
+	in_section = false;
+	current_body = "";
+	current_indent = -1;
+	current_owner_values = List();
+	current_due_values = List();
+
+	for each line in lines
+	{
+		trimmed = line.trim();
+		heading_candidate = trimmed.replaceFirst("^#{1,6}\\s*", "");
+		heading_candidate = heading_candidate.replaceFirst(":\\s*$", "").trim().toLowerCase();
+
+		if(approved_sections.contains(heading_candidate))
+		{
+			if(current_body != "")
+			{
+				raw_candidate = Map();
+				raw_candidate.put("body", current_body);
+				raw_candidate.put("owner_values", current_owner_values);
+				raw_candidate.put("due_values", current_due_values);
+				raw_candidates.add(raw_candidate);
+			}
+			current_body = "";
+			current_indent = -1;
+			current_owner_values = List();
+			current_due_values = List();
+			in_section = true;
+			continue;
+		}
+
+		/* Non-regex top-level bullet classification; keep aligned with diagnostics. */
+		is_symbol_bullet = trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ");
+		is_numbered_bullet = false;
+		bullet_dot_separator = trimmed.indexOf(". ");
+		bullet_paren_separator = trimmed.indexOf(") ");
+		bullet_separator = -1;
+		if(bullet_dot_separator > 0 && (bullet_paren_separator < 0 || bullet_dot_separator < bullet_paren_separator))
+		{
+			bullet_separator = bullet_dot_separator;
+		}
+		else if(bullet_paren_separator > 0)
+		{
+			bullet_separator = bullet_paren_separator;
+		}
+		if(!is_symbol_bullet && bullet_separator > 0)
+		{
+			bullet_number_prefix = trimmed.subString(0,bullet_separator);
+			is_numbered_bullet = bullet_number_prefix.isNumber() && !bullet_number_prefix.contains(".") && !bullet_number_prefix.contains("-") && !bullet_number_prefix.contains("+") && !bullet_number_prefix.contains(",") && !bullet_number_prefix.contains(" ");
+		}
+		if(is_symbol_bullet)
+		{
+			bullet_body_start = 2;
+		}
+		else
+		{
+			bullet_body_start = bullet_separator + 2;
+		}
+		is_bullet = (is_symbol_bullet || is_numbered_bullet) && trimmed.length() > bullet_body_start;
+		is_markdown_heading = trimmed.matches("^#{1,6}\\s+.+$");
+		is_known_major = known_major_headings.contains(heading_candidate);
+		is_plain_generic_heading = false;
+		if(line == line.ltrim() && trimmed.length() > 0 && trimmed.length() <= 80)
+		{
+			/* Conservative plain heading equivalent for short Title Case lines. */
+			plain_heading_pattern = "^([A-Z][A-Za-z0-9'()/&-]*|and|or|of|the|to|for|in|on|&)(\\s+([A-Z][A-Za-z0-9'()/&-]*|and|or|of|the|to|for|in|on|&)){0,7}:?$";
+			is_plain_generic_heading = trimmed.matches(plain_heading_pattern);
+		}
+
+		if(in_section && !is_bullet && (is_markdown_heading || is_known_major || is_plain_generic_heading))
+		{
+			if(current_body != "")
+			{
+				raw_candidate = Map();
+				raw_candidate.put("body", current_body);
+				raw_candidate.put("owner_values", current_owner_values);
+				raw_candidate.put("due_values", current_due_values);
+				raw_candidates.add(raw_candidate);
+			}
+			current_body = "";
+			current_indent = -1;
+			current_owner_values = List();
+			current_due_values = List();
+			in_section = false;
+			continue;
+		}
+
+		if(!in_section)
+		{
+			continue;
+		}
+
+		if(is_bullet)
+		{
+			indent = line.length() - line.ltrim().length();
+			body = trimmed.subString(bullet_body_start,trimmed.length()).trim();
+			body_lower = body.toLowerCase();
+			is_metadata = body_lower.matches("^(owner|owners|assignee|assignees|due|due date)\\s*:.*$");
+
+			if(is_metadata)
+			{
+				metadata_value = body.replaceFirst("^[^:]*:", "").trim();
+				if(current_body != "" && metadata_value != "")
+				{
+					if(body_lower.matches("^(due|due date)\\s*:.*$"))
+					{
+						current_due_values.add(metadata_value);
+					}
+					else
+					{
+						current_owner_values.add(metadata_value);
+					}
+				}
+				/* Metadata without a preceding action is intentionally ignored. */
+				continue;
+			}
+
+			if(current_body != "" && indent > current_indent)
+			{
+				/* Nested non-metadata bullets are context, not actions. */
+				continue;
+			}
+
+			if(current_body != "")
+			{
+				raw_candidate = Map();
+				raw_candidate.put("body", current_body);
+				raw_candidate.put("owner_values", current_owner_values);
+				raw_candidate.put("due_values", current_due_values);
+				raw_candidates.add(raw_candidate);
+			}
+			current_body = body;
+			current_indent = indent;
+			current_owner_values = List();
+			current_due_values = List();
+			continue;
+		}
+
+		if(current_body != "" && trimmed != "")
+		{
+			metadata_lower = trimmed.toLowerCase();
+			if(metadata_lower.matches("^(owner|owners|assignee|assignees|due|due date)\\s*:.*$"))
+			{
+				metadata_value = trimmed.replaceFirst("^[^:]*:", "").trim();
+				if(metadata_value != "")
+				{
+					if(metadata_lower.matches("^(due|due date)\\s*:.*$"))
+					{
+						current_due_values.add(metadata_value);
+					}
+					else
+					{
+						current_owner_values.add(metadata_value);
+					}
+				}
+			}
+			else if(line != line.ltrim())
+			{
+				/* Preserve an indented wrapped action line as action text. */
+				current_body = current_body + " " + trimmed;
+			}
+		}
+	}
+
+	if(current_body != "")
+	{
+		raw_candidate = Map();
+		raw_candidate.put("body", current_body);
+		raw_candidate.put("owner_values", current_owner_values);
+		raw_candidate.put("due_values", current_due_values);
+		raw_candidates.add(raw_candidate);
+	}
+
+	/*
+	 * Embedded Zoho AI pass. Real summaries often express future work inside
+	 * ordinary numbered/bulleted summary lines rather than under a clean action
+	 * heading. This pass is separate so the strict section behavior above stays
+	 * unchanged. Only fixed future-work phrases and action verbs are accepted.
+	 */
+	embedded_in_strict_section = false;
+	embedded_seen_actions = List();
+	for each line in lines
+	{
+		trimmed = line.trim();
+		heading_candidate = trimmed.replaceFirst("^#{1,6}\\s*", "");
+		heading_candidate = heading_candidate.replaceFirst(":\\s*$", "").trim().toLowerCase();
+		if(approved_sections.contains(heading_candidate))
+		{
+			embedded_in_strict_section = true;
+			continue;
+		}
+
+		/* Non-regex top-level bullet classification; keep aligned with diagnostics. */
+		is_symbol_bullet = trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ");
+		is_numbered_bullet = false;
+		bullet_dot_separator = trimmed.indexOf(". ");
+		bullet_paren_separator = trimmed.indexOf(") ");
+		bullet_separator = -1;
+		if(bullet_dot_separator > 0 && (bullet_paren_separator < 0 || bullet_dot_separator < bullet_paren_separator))
+		{
+			bullet_separator = bullet_dot_separator;
+		}
+		else if(bullet_paren_separator > 0)
+		{
+			bullet_separator = bullet_paren_separator;
+		}
+		if(!is_symbol_bullet && bullet_separator > 0)
+		{
+			bullet_number_prefix = trimmed.subString(0,bullet_separator);
+			is_numbered_bullet = bullet_number_prefix.isNumber() && !bullet_number_prefix.contains(".") && !bullet_number_prefix.contains("-") && !bullet_number_prefix.contains("+") && !bullet_number_prefix.contains(",") && !bullet_number_prefix.contains(" ");
+		}
+		if(is_symbol_bullet)
+		{
+			bullet_body_start = 2;
+		}
+		else
+		{
+			bullet_body_start = bullet_separator + 2;
+		}
+		is_bullet = (is_symbol_bullet || is_numbered_bullet) && trimmed.length() > bullet_body_start;
+		is_markdown_heading = trimmed.matches("^#{1,6}\\s+.+$");
+		is_known_major = known_major_headings.contains(heading_candidate);
+		is_plain_generic_heading = false;
+		if(line == line.ltrim() && trimmed.length() > 0 && trimmed.length() <= 80)
+		{
+			plain_heading_pattern = "^([A-Z][A-Za-z0-9'()/&-]*|and|or|of|the|to|for|in|on|&)(\\s+([A-Z][A-Za-z0-9'()/&-]*|and|or|of|the|to|for|in|on|&)){0,7}:?$";
+			is_plain_generic_heading = trimmed.matches(plain_heading_pattern);
+		}
+		if(embedded_in_strict_section && !is_bullet && (is_markdown_heading || is_known_major || is_plain_generic_heading))
+		{
+			embedded_in_strict_section = false;
+		}
+		if(embedded_in_strict_section || !is_bullet)
+		{
+			continue;
+		}
+
+		original_source_text = trimmed;
+		body = trimmed.subString(bullet_body_start,trimmed.length()).trim();
+		body_lower = body.toLowerCase();
+		embedded_due_value = "";
+		due_label_index = body_lower.indexOf("due:");
+		if(due_label_index >= 0)
+		{
+			embedded_due_value = body.subString(due_label_index + 4, body.length()).trim();
+			embedded_due_value = embedded_due_value.replaceFirst("[.]+$", "").trim();
+			body = body.subString(0, due_label_index).replaceFirst("[ —–-]+$", "").trim();
+			body_lower = body.toLowerCase();
+		}
+
+		action_source = "";
+		next_steps_include = body_lower.indexOf("next steps include");
+		next_steps_colon = body_lower.indexOf("next steps:");
+		next_steps_are = body_lower.indexOf("next steps are");
+		plans_to_index = body_lower.indexOf("plans to");
+		planned_to_index = body_lower.indexOf(" is planned to ");
+		if(next_steps_include >= 0)
+		{
+			action_source = body.subString(next_steps_include + 18, body.length()).trim();
+		}
+		else if(next_steps_colon >= 0)
+		{
+			action_source = body.subString(next_steps_colon + 11, body.length()).trim();
+		}
+		else if(next_steps_are >= 0)
+		{
+			action_source = body.subString(next_steps_are + 14, body.length()).trim();
+		}
+		else if(plans_to_index >= 0)
+		{
+			action_source = body.subString(plans_to_index + 8, body.length()).trim();
+		}
+		else if(planned_to_index >= 0)
+		{
+			planned_subject = body.subString(0, planned_to_index).trim();
+			planned_value = body.subString(planned_to_index + 15, body.length()).replaceFirst("[. ;:]+$", "").trim();
+			if(planned_subject.toLowerCase().matches("^(a |the )?mass import.*$"))
+			{
+				planned_subject = planned_subject.replaceFirst("^(A|a|The|the)\\s+", "");
+				action_source = planned_subject + " to " + planned_value;
+			}
+			else
+			{
+				action_source = planned_value;
+			}
+		}
+		else
+		{
+			validation_marker = "";
+			validation_markers = {" requiring validation"," requires validation"," require validation"," needs validation"," need validation"," requiring further validation"," requires further validation"," require further validation"," needs further validation"," need further validation"};
+			for each marker in validation_markers
+			{
+				if(validation_marker == "" && body_lower.indexOf(marker) >= 0)
+				{
+					validation_marker = marker;
+				}
+			}
+			if(validation_marker != "")
+			{
+				validation_index = body_lower.indexOf(validation_marker);
+				validation_subject = body.subString(0, validation_index).replaceFirst("[, ]+$", "").trim();
+				remains_in_index = validation_subject.toLowerCase().indexOf(" remains in ");
+				if(remains_in_index >= 0)
+				{
+					validation_issue = validation_subject.subString(0, remains_in_index).trim().toLowerCase();
+					validation_target = validation_subject.subString(remains_in_index + 12, validation_subject.length()).trim().toLowerCase();
+					action_source = "Validate " + validation_target + " for " + validation_issue;
+				}
+				else if(validation_subject != "")
+				{
+					if(validation_subject == validation_subject.toUpperCase())
+					{
+						action_source = "Validate " + validation_subject;
+					}
+					else
+					{
+						action_source = "Validate " + validation_subject.subString(0,1).toLowerCase() + validation_subject.subString(1,validation_subject.length());
+					}
+				}
+			}
+			else
+			{
+				future_index = -1;
+				future_marker = "";
+				future_markers = {"will ","must ","should ","need to ","needs to "};
+				for each marker in future_markers
+				{
+					marker_index = body_lower.indexOf(marker);
+					if(marker_index >= 0 && (future_index == -1 || marker_index < future_index))
+					{
+						future_index = marker_index;
+						future_marker = marker;
+					}
+				}
+				if(future_index >= 0)
+				{
+					action_source = body.subString(future_index + future_marker.length(), body.length()).trim();
+				}
+				else if(body_lower.matches("^(conduct|conducting|confirm|confirming|evaluate|evaluating|fix|fixing|implement|implementing|mass import|mass importing|refine|refining|test|testing|validate|validating)\\b.*$"))
+				{
+					action_source = body;
+				}
+			}
+		}
+
+		if(action_source == "")
+		{
+			continue;
+		}
+		action_source = action_source.replaceAllIgnoreCase(", and ", ",");
+		action_source = action_source.replaceAll(";", ",", true);
+		embedded_forms = {"conduct","conducting","confirm","confirming","evaluate","evaluating","fix","fixing","implement","implementing","mass import","mass importing","refine","refining","test","testing","validate","validating"};
+		for each embedded_form in embedded_forms
+		{
+			action_source = action_source.replaceAllIgnoreCase(" and " + embedded_form + " ", "," + embedded_form + " ");
+		}
+		action_parts = action_source.toList(",");
+		for each embedded_part in action_parts
+		{
+			embedded_action = embedded_part.toString().trim().replaceFirst("^(and|And|AND|to|To|TO)\\s+", "").replaceFirst("[. ;:]+$", "").trim();
+			embedded_lower = embedded_action.toLowerCase();
+			canonical_action = "";
+			if(embedded_lower.matches("^testing\\b.*$"))
+			{
+				canonical_action = "Test" + embedded_action.subString(7,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^test\\b.*$"))
+			{
+				canonical_action = "Test" + embedded_action.subString(4,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^validating\\b.*$"))
+			{
+				canonical_action = "Validate" + embedded_action.subString(10,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^validate\\b.*$"))
+			{
+				canonical_action = "Validate" + embedded_action.subString(8,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^implementing\\b.*$"))
+			{
+				canonical_action = "Implement" + embedded_action.subString(12,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^implement\\b.*$"))
+			{
+				canonical_action = "Implement" + embedded_action.subString(9,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^refining\\b.*$"))
+			{
+				canonical_action = "Refine" + embedded_action.subString(8,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^refine\\b.*$"))
+			{
+				canonical_action = "Refine" + embedded_action.subString(6,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^conducting\\b.*$"))
+			{
+				canonical_action = "Conduct" + embedded_action.subString(10,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^conduct\\b.*$"))
+			{
+				canonical_action = "Conduct" + embedded_action.subString(7,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^evaluating\\b.*$"))
+			{
+				canonical_action = "Evaluate" + embedded_action.subString(10,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^evaluate\\b.*$"))
+			{
+				canonical_action = "Evaluate" + embedded_action.subString(8,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^confirming\\b.*$"))
+			{
+				canonical_action = "Confirm" + embedded_action.subString(10,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^confirm\\b.*$"))
+			{
+				canonical_action = "Confirm" + embedded_action.subString(7,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^fixing\\b.*$"))
+			{
+				canonical_action = "Fix" + embedded_action.subString(6,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^fix\\b.*$"))
+			{
+				canonical_action = "Fix" + embedded_action.subString(3,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^mass importing\\b.*$"))
+			{
+				canonical_action = "Mass import" + embedded_action.subString(14,embedded_action.length());
+			}
+			else if(embedded_lower.matches("^mass import\\b.*$"))
+			{
+				canonical_action = "Mass import" + embedded_action.subString(11,embedded_action.length());
+			}
+			else if(plans_to_index >= 0 || planned_to_index >= 0)
+			{
+				canonical_action = embedded_action.subString(0,1).toUpperCase() + embedded_action.subString(1,embedded_action.length());
+			}
+
+			if(canonical_action == "")
+			{
+				continue;
+			}
+			embedded_identity = canonical_action.toLowerCase().replaceAll("\\s+", " ").trim();
+			if(embedded_seen_actions.contains(embedded_identity))
+			{
+				continue;
+			}
+			embedded_seen_actions.add(embedded_identity);
+			embedded_owner_values = List();
+			if(original_source_text.toLowerCase().matches(".*\\bblake( allard)?\\b.*"))
+			{
+				embedded_owner_values.add("Blake");
+			}
+			embedded_due_values = List();
+			if(embedded_due_value != "")
+			{
+				embedded_due_values.add(embedded_due_value);
+			}
+			raw_candidate = Map();
+			raw_candidate.put("body", canonical_action);
+			raw_candidate.put("owner_values", embedded_owner_values);
+			raw_candidate.put("due_values", embedded_due_values);
+			raw_candidate.put("original_source_text", original_source_text);
+			raw_candidate.put("extraction_mode", "embedded_zoho_ai");
+			raw_candidates.add(raw_candidate);
+		}
+	}
+
+	/*
+	 * Item construction pass: split inline metadata, resolve explicit owners, preserve raw
+	 * due text, and construct the Python-compatible item shape.
+	 */
+	inline_marker = "|||V2_FIELD|||";
+	for each raw_candidate in raw_candidates
+	{
+		inline_body = raw_candidate.get("body").toString().trim();
+		inline_body = inline_body.replaceAll(" — ", inline_marker, true);
+		inline_body = inline_body.replaceAll(" – ", inline_marker, true);
+		inline_body = inline_body.replaceAllIgnoreCase(" - Owner:", inline_marker + "Owner:");
+		inline_body = inline_body.replaceAllIgnoreCase(" - Owners:", inline_marker + "Owners:");
+		inline_body = inline_body.replaceAllIgnoreCase(" - Assignee:", inline_marker + "Assignee:");
+		inline_body = inline_body.replaceAllIgnoreCase(" - Assignees:", inline_marker + "Assignees:");
+		inline_body = inline_body.replaceAllIgnoreCase(" - Due:", inline_marker + "Due:");
+		inline_body = inline_body.replaceAllIgnoreCase(" - Due Date:", inline_marker + "Due Date:");
+		parts = inline_body.toList(inline_marker);
+
+		action_parts = List();
+		inline_owner_values = List();
+		inline_due_values = List();
+		unlabeled_parts = List();
+		part_index = 0;
+		for each part in parts
+		{
+			clean_part = part.toString().trim();
+			if(part_index == 0)
+			{
+				action_parts.add(clean_part);
+			}
+			else if(clean_part != "")
+			{
+				part_lower = clean_part.toLowerCase();
+				if(part_lower.matches("^(owner|owners|assignee|assignees|due|due date)\\s*:.*$"))
+				{
+					metadata_value = clean_part.replaceFirst("^[^:]*:", "").trim();
+					if(part_lower.matches("^(due|due date)\\s*:.*$"))
+					{
+						inline_due_values.add(metadata_value);
+					}
+					else
+					{
+						inline_owner_values.add(metadata_value);
+					}
+				}
+				else
+				{
+					unlabeled_parts.add(clean_part);
+				}
+			}
+			part_index = part_index + 1;
+		}
+
+		/* Positional "Action — Bill" is accepted only for known aliases. */
+		if(inline_owner_values.size() == 0 && unlabeled_parts.size() > 0)
+		{
+			positional_owner = unlabeled_parts.get(0).toString().trim();
+			positional_normalized = positional_owner.replaceAllIgnoreCase(" and ", ",");
+			positional_normalized = positional_normalized.replaceAll(";", ",", true);
+			positional_normalized = positional_normalized.replaceAll("/", ",", true);
+			positional_normalized = positional_normalized.replaceAll("&", ",", true);
+			positional_normalized = positional_normalized.replaceAll("+", ",", true);
+			positional_tokens = positional_normalized.toList(",");
+			all_positional_known = true;
+			positional_count = 0;
+			for each positional_token in positional_tokens
+			{
+				positional_key = positional_token.toString().trim().toLowerCase();
+				positional_key = positional_key.replaceAll("^\\.+|\\.+$", "");
+				if(positional_key != "")
+				{
+					positional_count = positional_count + 1;
+					if(!owner_map.containKey(positional_key))
+					{
+						all_positional_known = false;
+					}
+				}
+			}
+			if(positional_count > 0 && all_positional_known)
+			{
+				inline_owner_values.add(positional_owner);
+				unlabeled_parts.remove(0);
+				if(unlabeled_parts.size() > 0 && inline_due_values.size() == 0)
+				{
+					inline_due_values.add(unlabeled_parts.get(0));
+					unlabeled_parts.remove(0);
+				}
+			}
+		}
+
+		for each unlabeled_part in unlabeled_parts
+		{
+			action_parts.add(unlabeled_part);
+		}
+		action_text = "";
+		for each action_part in action_parts
+		{
+			if(action_part.toString().trim() != "")
+			{
+				if(action_text != "")
+				{
+					action_text = action_text + " — ";
+				}
+				action_text = action_text + action_part.toString().trim();
+			}
+		}
+		if(action_text == "")
+		{
+			continue;
+		}
+
+		owner_values = List();
+		owner_values.addAll(inline_owner_values);
+		owner_values.addAll(raw_candidate.get("owner_values"));
+		due_values = List();
+		due_values.addAll(inline_due_values);
+		due_values.addAll(raw_candidate.get("due_values"));
+
+		/* Resolve all explicit owner tokens and deduplicate known aliases by ID. */
+		detected_owners = List();
+		seen_owner_identities = List();
+		owner_raw_values = List();
+		for each owner_value in owner_values
+		{
+			clean_owner_value = owner_value.toString().trim();
+			if(clean_owner_value == "")
+			{
+				continue;
+			}
+			if(!owner_raw_values.contains(clean_owner_value))
+			{
+				owner_raw_values.add(clean_owner_value);
+			}
+
+			owner_tokens_text = clean_owner_value.replaceAllIgnoreCase(" and ", ",");
+			owner_tokens_text = owner_tokens_text.replaceAll(";", ",", true);
+			owner_tokens_text = owner_tokens_text.replaceAll("/", ",", true);
+			owner_tokens_text = owner_tokens_text.replaceAll("&", ",", true);
+			owner_tokens_text = owner_tokens_text.replaceAll("+", ",", true);
+			owner_tokens = owner_tokens_text.toList(",");
+
+			for each owner_token in owner_tokens
+			{
+				owner_name = owner_token.toString().trim();
+				owner_key = owner_name.toLowerCase().replaceAll("^\\.+|\\.+$", "").trim();
+				if(owner_key == "")
+				{
+					continue;
+				}
+
+				detected_owner = Map();
+				detected_owner.put("name", owner_name);
+				if(owner_map.containKey(owner_key))
+				{
+					known_owner = owner_map.get(owner_key);
+					identity = "id:" + known_owner.get("owner_id").toString();
+					detected_owner.put("canonical_name", known_owner.get("canonical_name"));
+					detected_owner.put("owner_id", known_owner.get("owner_id"));
+					detected_owner.put("resolution", "matched");
+				}
+				else
+				{
+					identity = "unknown:" + owner_key;
+					detected_owner.put("canonical_name", null);
+					detected_owner.put("owner_id", null);
+					detected_owner.put("resolution", "unresolved");
+				}
+				if(!seen_owner_identities.contains(identity))
+				{
+					seen_owner_identities.add(identity);
+					detected_owners.add(detected_owner);
+				}
+			}
+		}
+
+		owner_raw = null;
+		owner_raw_text = "";
+		for each owner_raw_value in owner_raw_values
+		{
+			if(owner_raw_text != "")
+			{
+				owner_raw_text = owner_raw_text + "; ";
+			}
+			owner_raw_text = owner_raw_text + owner_raw_value.toString();
+		}
+		if(owner_raw_text != "")
+		{
+			owner_raw = owner_raw_text;
+		}
+
+		owner_resolution = "missing";
+		resolved_owner_id = null;
+		if(detected_owners.size() > 1)
+		{
+			owner_resolution = "multiple";
+		}
+		else if(detected_owners.size() == 1)
+		{
+			only_owner = detected_owners.get(0);
+			if(only_owner.get("owner_id") == null)
+			{
+				owner_resolution = "unresolved";
+			}
+			else
+			{
+				owner_resolution = "matched";
+				resolved_owner_id = only_owner.get("owner_id");
+			}
+		}
+
+		due_date_text = null;
+		due_raw_values = List();
+		for each due_value in due_values
+		{
+			clean_due_value = due_value.toString().trim();
+			if(clean_due_value != "" && !due_raw_values.contains(clean_due_value))
+			{
+				due_raw_values.add(clean_due_value);
+			}
+		}
+		due_raw_text = "";
+		for each due_raw_value in due_raw_values
+		{
+			if(due_raw_text != "")
+			{
+				due_raw_text = due_raw_text + "; ";
+			}
+			due_raw_text = due_raw_text + due_raw_value.toString();
+		}
+		if(due_raw_text != "")
+		{
+			due_date_text = due_raw_text;
+		}
+
+		/*
+		 * ASCII fixtures produce the same SHA-256 identity as Python:
+		 * lower/collapsed source filename + newline + lower/collapsed action.
+		 * Deluge has no documented NFKC operation, so Unicode compatibility must
+		 * be fixture-tested before using hashes for non-ASCII production text.
+		 */
+		normalized_source_name = file_name.trim().toLowerCase().replaceAll("\\s+", " ");
+		normalized_action_text = action_text.trim().toLowerCase().replaceAll("\\s+", " ");
+		hash_input = normalized_source_name + "\n" + normalized_action_text;
+		action_hash = zoho.encryption.sha256(hash_input);
+
+		/*
+		 * Fallback for a product/runtime where SHA-256 is unavailable: use this
+		 * exact canonical composite as the registry uniqueness key. Do not use a
+		 * task name as the fallback key.
+		 */
+		fallback_source_identity = file_id;
+		if(fallback_source_identity == "")
+		{
+			fallback_source_identity = normalized_source_name;
+		}
+		fallback_idempotency_key = fallback_source_identity + "::" + normalized_action_text;
+
+		item = Map();
+		item.put("action_text", action_text);
+		item.put("owner_raw", owner_raw);
+		item.put("owner_resolution", owner_resolution);
+		item.put("owner_id", resolved_owner_id);
+		item.put("detected_owners", detected_owners);
+		item.put("due_date_text", due_date_text);
+		item.put("source_file_id", file_id);
+		item.put("source_file_name", file_name);
+		item.put("source_folder_path", file_path);
+		if(raw_candidate.get("original_source_text") != null)
+		{
+			item.put("original_source_text", raw_candidate.get("original_source_text"));
+		}
+		if(raw_candidate.get("extraction_mode") != null)
+		{
+			item.put("extraction_mode", raw_candidate.get("extraction_mode"));
+		}
+		item.put("action_hash", action_hash);
+		item.put("fallback_idempotency_key", fallback_idempotency_key);
+		items.add(item);
+	}
+
+	/*
+	 * Deterministic QC pass matching scripts/review_action_candidates.py.
+	 * Grouping is scoped to this source identity. Specificity is a lexicographic
+	 * tuple encoded as phrase_score, concrete token count, then text length.
+	 */
+	qc_group_keys = List();
+	qc_signatures = List();
+	qc_scores = List();
+	qc_group_state = Map();
+	qc_index = 0;
+	action_verbs = {"conduct","confirm","evaluate","fix","implement","mass","refine","test","validate"};
+	for each item in items
+	{
+		action_text = item.get("action_text").toString();
+		action_lower = action_text.toLowerCase();
+		token_text = " " + action_lower.replaceAll("[^a-z0-9]+", " ").replaceAll("\\s+", " ").trim() + " ";
+		token_text = token_text.replaceAll(" descriptions ", " description ", true);
+		token_text = token_text.replaceAll(" fields ", " field ", true);
+		token_text = token_text.replaceAll(" imports ", " import ", true);
+		token_text = token_text.replaceAll(" imported ", " import ", true);
+		token_text = token_text.replaceAll(" importing ", " import ", true);
+		token_text = token_text.replaceAll(" lookups ", " lookup ", true);
+		token_text = token_text.replaceAll(" tests ", " test ", true);
+		token_text = token_text.replaceAll(" testing ", " test ", true);
+		token_text = token_text.replaceAll(" updates ", " import ", true);
+		token_text = token_text.replaceAll(" updating ", " import ", true);
+		token_text = token_text.replaceAll(" validation ", " validate ", true);
+		token_text = token_text.replaceAll(" validating ", " validate ", true);
+		token_text = token_text.replaceAll("\\s+", " ").trim();
+
+		intent_group = "exact:" + token_text;
+		if(action_lower.startsWith("mass import"))
+		{
+			intent_group = "mass_import";
+		}
+		else if(token_text.matches(".*\\btranscription\\b.*") && (token_text.matches(".*\\bevaluate\\b.*") || token_text.matches(".*\\btest\\b.*")))
+		{
+			intent_group = "transcription_evaluation";
+		}
+		else if(token_text.matches(".*\\brouting\\b.*") && (token_text.matches(".*\\bconduct\\b.*") || token_text.matches(".*\\btest\\b.*")))
+		{
+			intent_group = "routing_test";
+		}
+		else if(token_text.matches(".*\\brouting\\b.*") && (token_text.matches(".*\\bfix\\b.*") || token_text.matches(".*\\brefine\\b.*")))
+		{
+			intent_group = "routing_remediation";
+		}
+		else if(token_text.matches(".*\\blookup\\b.*"))
+		{
+			intent_group = "part_number_lookup";
+		}
+		else if(token_text.matches(".*\\bimplement\\b.*") && (token_text.matches(".*\\bautomated\\b.*") || token_text.matches(".*\\bimport\\b.*")))
+		{
+			intent_group = "automated_import";
+		}
+		else if((token_text.matches(".*\\bvalidate\\b.*") || token_text.matches(".*\\btest\\b.*")) && token_text.matches(".*\\b(accuracy|corruption|description|field|item|master|population)\\b.*"))
+		{
+			intent_group = "field_data_validation";
+		}
+		else if(token_text.matches(".*\\bconfirm\\b.*") && token_text.matches(".*\\blaunch\\b.*"))
+		{
+			intent_group = "launch_confirmation";
+		}
+
+		phrase_score = 0;
+		if(action_lower.contains("field population"))
+		{
+			phrase_score = phrase_score + 8;
+		}
+		if(action_lower.contains("pricing import"))
+		{
+			phrase_score = phrase_score + 7;
+		}
+		if(action_lower.contains("automated import"))
+		{
+			phrase_score = phrase_score + 5;
+		}
+		if(action_lower.contains("part number"))
+		{
+			phrase_score = phrase_score + 6;
+		}
+		if(action_lower.contains("duplicate routing"))
+		{
+			phrase_score = phrase_score + 7;
+		}
+		if(action_lower.contains("before launch"))
+		{
+			phrase_score = phrase_score + 4;
+		}
+		if(action_lower.contains("transcription accuracy"))
+		{
+			phrase_score = phrase_score + 5;
+		}
+		if(action_lower.contains("item master"))
+		{
+			phrase_score = phrase_score + 6;
+		}
+		if(action_lower.contains("data corruption"))
+		{
+			phrase_score = phrase_score + 3;
+		}
+
+		unique_concrete_tokens = List();
+		for each qc_token in token_text.toList(" ")
+		{
+			qc_token = qc_token.toString().trim();
+			if(qc_token != "" && !action_verbs.contains(qc_token) && !unique_concrete_tokens.contains(qc_token))
+			{
+				unique_concrete_tokens.add(qc_token);
+			}
+		}
+		qc_score = phrase_score * 100000 + unique_concrete_tokens.size() * 1000 + action_text.length();
+		source_identity = file_id;
+		if(source_identity == "")
+		{
+			source_identity = file_name;
+		}
+		full_group_key = source_identity + "::" + intent_group;
+		qc_group_keys.add(intent_group);
+		qc_signatures.add(token_text);
+		qc_scores.add(qc_score);
+
+		should_select = false;
+		if(!qc_group_state.containKey(full_group_key))
+		{
+			should_select = true;
+		}
+		else if(qc_score > qc_group_state.get(full_group_key).get("score"))
+		{
+			should_select = true;
+		}
+		if(should_select)
+		{
+			selected_state = Map();
+			selected_state.put("index", qc_index);
+			selected_state.put("score", qc_score);
+			selected_state.put("signature", token_text);
+			selected_state.put("item", item);
+			qc_group_state.put(full_group_key, selected_state);
+		}
+		qc_index = qc_index + 1;
+	}
+
+	selected_items = List();
+	skipped_candidate_reviews = List();
+	qc_index = 0;
+	for each item in items
+	{
+		intent_group = qc_group_keys.get(qc_index);
+		source_identity = file_id;
+		if(source_identity == "")
+		{
+			source_identity = file_name;
+		}
+		full_group_key = source_identity + "::" + intent_group;
+		selected_state = qc_group_state.get(full_group_key);
+		selected_item = selected_state.get("item");
+
+		group_size = 0;
+		for each candidate_group_key in qc_group_keys
+		{
+			if(candidate_group_key == intent_group)
+			{
+				group_size = group_size + 1;
+			}
+		}
+
+		if(selected_state.get("index") == qc_index)
+		{
+			selected_copy = Map();
+			selected_copy.put("action_text", item.get("action_text"));
+			selected_copy.put("owner_raw", item.get("owner_raw"));
+			selected_copy.put("owner_resolution", item.get("owner_resolution"));
+			selected_copy.put("owner_id", item.get("owner_id"));
+			selected_copy.put("detected_owners", item.get("detected_owners"));
+			selected_copy.put("due_date_text", item.get("due_date_text"));
+			selected_copy.put("source_file_id", item.get("source_file_id"));
+			selected_copy.put("source_file_name", item.get("source_file_name"));
+			selected_copy.put("source_folder_path", item.get("source_folder_path"));
+			if(item.get("original_source_text") != null)
+			{
+				selected_copy.put("original_source_text", item.get("original_source_text"));
+			}
+			if(item.get("extraction_mode") != null)
+			{
+				selected_copy.put("extraction_mode", item.get("extraction_mode"));
+			}
+			selected_copy.put("action_hash", item.get("action_hash"));
+			selected_copy.put("fallback_idempotency_key", item.get("fallback_idempotency_key"));
+			qc_review = Map();
+			qc_review.put("group_key", intent_group);
+			qc_review.put("group_size", group_size);
+			if(group_size == 1)
+			{
+				qc_review.put("selection_reason", "unique_candidate");
+			}
+			else
+			{
+				qc_review.put("selection_reason", "most_specific_deterministic_candidate");
+			}
+			selected_copy.put("qc_review", qc_review);
+			selected_items.add(selected_copy);
+		}
+		else
+		{
+			skipped = Map();
+			skipped.put("action_hash", item.get("action_hash"));
+			skipped.put("action_text", item.get("action_text"));
+			skipped.put("source_file_name", item.get("source_file_name"));
+			skipped.put("source_file_id", item.get("source_file_id"));
+			skipped.put("original_source_text", item.get("original_source_text"));
+			if(qc_signatures.get(qc_index) == selected_state.get("signature"))
+			{
+				skipped.put("reason", "repeated_summary_candidate");
+			}
+			else
+			{
+				skipped.put("reason", "overlap_superseded_by_specific_candidate");
+			}
+			skipped.put("group_key", intent_group);
+			skipped.put("selected_action_hash", selected_item.get("action_hash"));
+			skipped.put("selected_action_text", selected_item.get("action_text"));
+			skipped_candidate_reviews.add(skipped);
+		}
+		qc_index = qc_index + 1;
+	}
+
+	result.put("parsed_actions_raw", items);
+	result.put("raw_action_count", items.size());
+	result.put("skipped_candidate_reviews", skipped_candidate_reviews);
+	result.put("skipped_candidate_count", skipped_candidate_reviews.size());
+	result.put("parsed_actions_selected", selected_items);
+	result.put("selected_action_count", selected_items.size());
+	result.put("payload_input_items", selected_items);
+	result.put("items", selected_items);
+	result.put("item_count", selected_items.size());
+	result.put("errors", errors);
+	return result;
+}

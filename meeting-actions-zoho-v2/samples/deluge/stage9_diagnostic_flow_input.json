@@ -1,0 +1,7 @@
+{
+  "file_id": "dqftz0624072c37654c0ca469052b49bd0418",
+  "file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+  "file_path": "06-30 - Blake's Weekly Catch-Up",
+  "file_text": "[Sanitized real-file fixture. Accepted only with verified source folder \"06-30 - Blake's Weekly Catch-Up\"; otherwise reject as non-target.]\n\n1. The team reviewed an internal workflow and its current implementation.\n2. Several data-quality and automation concerns were discussed.\n3. Key next steps include testing field population accuracy, implementing automated updates, and refining the part number lookup functionality.\n\n- The current process still requires manual validation in several places.\n- Key next steps: validate field accuracy, implement automated pricing imports, and refine routing logic.\n- Blake plans to conduct routing tests and evaluate transcription accuracy.\n- A mass import from the sanitized pricing matrix is planned to populate the full item master.\n- Imported descriptions need validation before release.\n- Data corruption remains in imported descriptions, requiring validation.\n- Fix duplicate routing before launch.\n- Confirm launch readiness with stakeholders — Due: Friday.\n- The team implemented an earlier prototype last quarter.\n- Another next-steps sentence appears in ordinary prose rather than under an approved action heading.\n\n[The downloaded WorkDrive source contained no standalone Action Items, Action Item, Next Actions, or Next Steps heading.]\n",
+  "diagnostic_mode": true
+}

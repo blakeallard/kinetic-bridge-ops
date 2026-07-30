@@ -1,0 +1,107 @@
+[
+  {
+    "dry_run": true,
+    "portal_id": "898600220",
+    "project_id": "2543412000001324010",
+    "status": {
+      "name": "In Progress",
+      "id": "2543412000000031001",
+      "verified": true
+    },
+    "tags": [
+      {
+        "name": "automation",
+        "id": "2543412000001391053"
+      },
+      {
+        "name": "internal-work",
+        "id": "2543412000001391061"
+      }
+    ],
+    "task_parameters": {
+      "name": "Partner Automation Review - Prepare the test matrix",
+      "description": "Source: Zoho AI meeting summary\nSummary file: multiple_unknown_summary.txt\nMeeting name: Partner Automation Review\nOriginal action text: Prepare the test matrix\nOwner raw: Blake Allard and Bill Beverley\nOwner resolution: multiple\nDetected owners: Blake Allard (resolution=matched; canonical_name=Blake Allard; owner_id=2543412000001324206); Bill Beverley (resolution=matched; canonical_name=Bill Beverley; owner_id=2543412000000059003)\nDue date text: next Tuesday\nDue date calculation: Not performed\nAction hash: 53b174d016ad637ee8dd4ef81c4cce8be95772ce8ddcb284f230d8bc3a21a462\n\nWorkflow Diagnostic\nRequested task: Not provided\nBusiness problem: Not provided\nDesired workflow: Not provided\nSuccess criteria: Not provided\nCurrent status: Not provided\nProblem type: Not provided\nSystems involved: Not provided\nData needed: Not provided\nAccess / approval needed: Not provided\nInformation between systems: Not provided\nOne-sentence diagnosis: Not provided\nNext action: Not provided",
+      "custom_status": "2543412000000031001",
+      "tagIds": [
+        "2543412000001391053",
+        "2543412000001391061"
+      ]
+    },
+    "validation": {
+      "ready_for_live": true,
+      "missing_status_id": false,
+      "missing_tag_ids": [],
+      "owner_assignment": "unassigned"
+    }
+  },
+  {
+    "dry_run": true,
+    "portal_id": "898600220",
+    "project_id": "2543412000001324010",
+    "status": {
+      "name": "In Progress",
+      "id": "2543412000000031001",
+      "verified": true
+    },
+    "tags": [
+      {
+        "name": "automation",
+        "id": "2543412000001391053"
+      },
+      {
+        "name": "internal-work",
+        "id": "2543412000001391061"
+      }
+    ],
+    "task_parameters": {
+      "name": "Partner Automation Review - Confirm vendor access",
+      "description": "Source: Zoho AI meeting summary\nSummary file: multiple_unknown_summary.txt\nMeeting name: Partner Automation Review\nOriginal action text: Confirm vendor access\nOwner raw: Taylor Morgan\nOwner resolution: unresolved\nDetected owners: Taylor Morgan (resolution=unresolved)\nDue date text: Not provided\nDue date calculation: Not performed\nAction hash: b53cb9fff895555ceb6d51e3236748f31d2ed4ade90f823bda1f35cd0da9b6b9\n\nWorkflow Diagnostic\nRequested task: Not provided\nBusiness problem: Not provided\nDesired workflow: Not provided\nSuccess criteria: Not provided\nCurrent status: Not provided\nProblem type: Not provided\nSystems involved: Not provided\nData needed: Not provided\nAccess / approval needed: Not provided\nInformation between systems: Not provided\nOne-sentence diagnosis: Not provided\nNext action: Not provided",
+      "custom_status": "2543412000000031001",
+      "tagIds": [
+        "2543412000001391053",
+        "2543412000001391061"
+      ]
+    },
+    "validation": {
+      "ready_for_live": true,
+      "missing_status_id": false,
+      "missing_tag_ids": [],
+      "owner_assignment": "unassigned"
+    }
+  },
+  {
+    "dry_run": true,
+    "portal_id": "898600220",
+    "project_id": "2543412000001324010",
+    "status": {
+      "name": "In Progress",
+      "id": "2543412000000031001",
+      "verified": true
+    },
+    "tags": [
+      {
+        "name": "automation",
+        "id": "2543412000001391053"
+      },
+      {
+        "name": "internal-work",
+        "id": "2543412000001391061"
+      }
+    ],
+    "task_parameters": {
+      "name": "Partner Automation Review - Document handoff notes",
+      "description": "Source: Zoho AI meeting summary\nSummary file: multiple_unknown_summary.txt\nMeeting name: Partner Automation Review\nOriginal action text: Document handoff notes\nOwner raw: Not provided\nOwner resolution: missing\nDetected owners: None detected\nDue date text: Not provided\nDue date calculation: Not performed\nAction hash: 00e6e709e9504636fc684be23b00cf58169400faf4aedb06a9a51940005ae184\n\nWorkflow Diagnostic\nRequested task: Not provided\nBusiness problem: Not provided\nDesired workflow: Not provided\nSuccess criteria: Not provided\nCurrent status: Not provided\nProblem type: Not provided\nSystems involved: Not provided\nData needed: Not provided\nAccess / approval needed: Not provided\nInformation between systems: Not provided\nOne-sentence diagnosis: Not provided\nNext action: Not provided",
+      "custom_status": "2543412000000031001",
+      "tagIds": [
+        "2543412000001391053",
+        "2543412000001391061"
+      ]
+    },
+    "validation": {
+      "ready_for_live": true,
+      "missing_status_id": false,
+      "missing_tag_ids": [],
+      "owner_assignment": "unassigned"
+    }
+  }
+]

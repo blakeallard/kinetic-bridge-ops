@@ -1,0 +1,172 @@
+[
+  {
+    "action_text": "Test field population accuracy",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "3. Key next steps include testing field population accuracy, implementing automated updates, and refining the part number lookup functionality.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "cafa5c1bbf9459b2d3fb0eb0ec0efc054cbfb50932546fc3d5d526de827c7ca1"
+  },
+  {
+    "action_text": "Implement automated updates",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "3. Key next steps include testing field population accuracy, implementing automated updates, and refining the part number lookup functionality.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "852c631cc24044bfa75fc43fd6a2b107ebdc576aacd516477c2ee9cbe7b6fe1d"
+  },
+  {
+    "action_text": "Refine the part number lookup functionality",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "3. Key next steps include testing field population accuracy, implementing automated updates, and refining the part number lookup functionality.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "ad4b0b98077b350cd2192cc038f3dbb9c4b93d4c4e81c569840bf499d07bf15b"
+  },
+  {
+    "action_text": "Validate field accuracy",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Key next steps: validate field accuracy, implement automated pricing imports, and refine routing logic.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "7024ba4c94baadb4a0348d5e8e939cf64cafd5ef2347aad827b1075ebc7316e4"
+  },
+  {
+    "action_text": "Implement automated pricing imports",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Key next steps: validate field accuracy, implement automated pricing imports, and refine routing logic.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "ee26f9639aa63b2796652cc118ad4cdad0532e10ce4cd91325af2079317d145b"
+  },
+  {
+    "action_text": "Refine routing logic",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Key next steps: validate field accuracy, implement automated pricing imports, and refine routing logic.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "2bf82f97fd64d69ba5b99b4b194a526d1d4fe8186c2a8d4c87804c0d8cd53c9e"
+  },
+  {
+    "action_text": "Conduct routing tests",
+    "owner_raw": "Blake",
+    "owner_resolution": "matched",
+    "owner_id": "2543412000001324206",
+    "detected_owners": [
+      {
+        "name": "Blake",
+        "canonical_name": "Blake Allard",
+        "owner_id": "2543412000001324206",
+        "resolution": "matched"
+      }
+    ],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Blake plans to conduct routing tests and evaluate transcription accuracy.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "1fc803be565bb9f00a5a16c674a35bcee0b3310da5245b6f59025031c2137615"
+  },
+  {
+    "action_text": "Evaluate transcription accuracy",
+    "owner_raw": "Blake",
+    "owner_resolution": "matched",
+    "owner_id": "2543412000001324206",
+    "detected_owners": [
+      {
+        "name": "Blake",
+        "canonical_name": "Blake Allard",
+        "owner_id": "2543412000001324206",
+        "resolution": "matched"
+      }
+    ],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Blake plans to conduct routing tests and evaluate transcription accuracy.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "84af0f11290aa3207d0de7a63b75443e7c18890637873991bd557acc0a657fba"
+  },
+  {
+    "action_text": "Mass import from the sanitized pricing matrix to populate the full item master",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- A mass import from the sanitized pricing matrix is planned to populate the full item master.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "3fb81d96ab8bb5ffee587b532ecfc20ff13ce5ff87f1e36a4f83f9d9b25eacfc"
+  },
+  {
+    "action_text": "Validate imported descriptions",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Imported descriptions need validation before release.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "615a9d9430cd7782b590bff5c554df16ad3e52c19cf8495fa98edb1f6e3d3545"
+  },
+  {
+    "action_text": "Validate imported descriptions for data corruption",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Data corruption remains in imported descriptions, requiring validation.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "a8cca0892dfc05a42a482e6cbf275b206b12dc8abcc5ccd952ddf22775cf04bc"
+  },
+  {
+    "action_text": "Fix duplicate routing before launch",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": null,
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Fix duplicate routing before launch.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "525a3f05e8d8e76063b56a17ee481874991d3eb0bbab50938cdadbdbd5d0c38d"
+  },
+  {
+    "action_text": "Confirm launch readiness with stakeholders",
+    "owner_raw": null,
+    "owner_resolution": "missing",
+    "owner_id": null,
+    "detected_owners": [],
+    "due_date_text": "Friday",
+    "source_file_name": "Zoho AI - Bevco <> MWS - LA Tech Week Weekly Tag-Up_summary.txt",
+    "original_source_text": "- Confirm launch readiness with stakeholders — Due: Friday.",
+    "extraction_mode": "embedded_zoho_ai",
+    "action_hash": "bd77d8378228075b5ee822f2b375d4ee8666d4ac71c13e090df9051d05983364"
+  }
+]

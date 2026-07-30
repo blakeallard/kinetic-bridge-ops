@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "source_file_id": "workdrive-sample-file-001",
+      "source_file_name": "known_owner_summary.txt",
+      "processed_action_hashes": [
+        "202e3eb54a60abcdc7352601c46935d0b2f3e64b6acb760bd3c6a35255043fb8"
+      ]
+    }
+  ]
+}
+
