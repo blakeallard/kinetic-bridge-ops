@@ -1,0 +1,6 @@
+# Railway/Nixpacks build config.
+# ffmpeg (+ ffprobe) are required to extract and chunk audio from the MP4
+# recordings before sending them to OpenAI. aptPkgs is additive — it does not
+# replace the Python toolchain Nixpacks installs automatically.
+[phases.setup]
+aptPkgs = ["ffmpeg"]
